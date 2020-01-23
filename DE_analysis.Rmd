@@ -1,0 +1,2285 @@
+---
+title: "Diferential Expression Analysis"
+author: "Tain Velasco-Luquez"
+date: "07/2019"
+output:
+  html_document:
+    df_print: tibble
+    toc: yes
+  pdf_document:
+    toc: yes
+editor_options:
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(error = T,
+                      warning = F,
+                      collapse = T,
+                      strip.white = T,
+                      tidy = T,
+                      autodep = T,
+                      fig.align = 'center')
+```
+
+
+# Description
+This is the code support for a paper in preparation and inteds to provide thorough explanation of the step-by-step Differential Expression (DE) section.
+
+It is key to bare in mind the experimental desing: NHA cell cultures were treated with 1. Palmitic Acid (PA), 2. Tibolone, 3. PA + tibolone. There are two controls, 4. Vehicles alone and 5. DMEM alone. Each of these 5 treatments has two technical replicates (RNA coming from the same NHA donnor) and three biological replicates (RNA coming from different NHA donnors with different sex) summing up 30 samples in total. NHA1 is from a **male** donnor, NHA2 is from a **female** donnor and NHA3 is from a **female** donnor too.
+alcohol () + carnitina () + BCA ()
+
+![](Figures/experimental_design.png)
+
+## Author
+* Tain Velasco-Luquez (<tvelasco@javeriana.edu.co>).
+GitHub @[TainVelasco-Luquez](https://github.com/TainVelasco-Luquez).
+
+#### Last update on 08/19
+
+## Licence
+This work is subjected to the associated publication's and Pontificia Universidad Javeriana's licence.
+
+# Packages
+```{r library, message=FALSE, warning=FALSE, error=FALSE, results='hide'}
+Packages <- c("tictoc", "gridExtra", "ggfortify", "pheatmap", "RColorBrewer", "VennDiagram", "GOplot", "ggfortify", "tximport", "plotly", "readr", "rlist","ConsensusClusterPlus", "org.Hs.eg.db", "doBy", "rlist", "gprofiler2", "pvclust", "AnnotationDbi", "randomForest", "org.Hs.eg.db", "stringr", "MyRfunctions", "gridExtra", "ComplexHeatmap", "DESeq2", "knitr", "WGCNA", "GeneOverlap", "CEMiTool", "biomaRt", "igraph", "tidyverse", "dplyr"); lapply(Packages, library, character.only = TRUE); rm(Packages)
+```
+```{r eval=FALSE, include=FALSE}
+vali <- readRDS(file = "Data/salmon_matrix_count.rds") # count matrix in TPM as per salmon and trximport
+#x <- readRDS("Data/x.rds") #DESeqDataSetFromTximport
+#x_morethan10 <- x[rowSums(counts(x)) >= 10, ]
+maxCooks <- readRDS(file = "Data/maxCooks_dds_nosex.rds")
+x_morethan10 <- readRDS(file = "Data/x_morethan10_noOutliers.rds")
+#x_rld <- readRDS("Data/x_rld.rds") #DESeqDataSetFromTximport rld normalised
+dds <- readRDS("Data/dds.rds") #DESeq(x_morethan10)
+LFC_pa_joint <- read.csv("Results/Individual_contrasts/alpha0.05_lfcThreshold0.5/LFC_pa_joint_no_outliers.csv")
+upGenes_ByPa <- read.csv("Results/Individual_contrasts/alpha0.05_lfcThreshold0.5/upGenes_ByPa.csv")
+joint <- read.csv("Results/Individual_contrasts/alpha0.05_lfcThreshold0.5/joint_vs_vehiculo_alpha0.05_lfcThreshold0.5.csv")
+df <- as.data.frame(colData(dds));df <- df[,-c(4,5)]
+dds_rlog <- readRDS("Data/dds_rlog.rds") #rlog(dds)
+```
+
+
+# Importing files
+Firstly we are going to import the Salmon generated `quant.sf` files for each of the 30 samples described in the experimental design. These files contain the raw count and the TPM values for each identified gene per sample.
+
+``` {r, include=TRUE, eval=FALSE}
+files <- c("./1-3/Salmon./quant.sf",
+           "./2-3/Salmon./quant.sf",
+           "./3-3/Salmon./quant.sf",
+           "./4-3/Salmon./quant.sf",
+           "./5-3/Salmon./quant.sf",
+           "./6-3/Salmon./quant.sf",
+           "./7-3/Salmon./quant.sf",
+           "./8-3/Salmon./quant.sf",
+           "./9-3/Salmon./quant.sf",
+           "./10-3/Salmon./quant.sf",
+           "./11-3/Salmon./quant.sf",
+           "./12-3/Salmon./quant.sf",
+           "./13-3/Salmon./quant.sf",
+           "./14-3/Salmon./quant.sf",
+           "./15-3/Salmon./quant.sf",
+           "./16-3/Salmon./quant.sf",
+           "./17-3/Salmon./quant.sf",
+           "./18-3/Salmon./quant.sf",
+           "./19-3/Salmon./quant.sf",
+           "./20-3/Salmon./quant.sf",
+           "./21-3/Salmon./quant.sf",
+           "./22-3/Salmon./quant.sf",
+           "./23-3/Salmon./quant.sf",
+           "./24-3/Salmon./quant.sf",
+           "./25-3/Salmon./quant.sf",
+           "./26-3/Salmon./quant.sf",
+           "./27-3/Salmon./quant.sf",
+           "./28-3/Salmon./quant.sf",
+           "./29-3/Salmon./quant.sf",
+           "./30-3/Salmon./quant.sf")
+
+names(files) <- c("1_NHA1_tibolona_rep1",
+"2_NHA1_tibolona_rep2",
+"3_NHA1_DMEM_rep1",
+"4_NHA1_DMEM_rep2",
+"5_NHA1_TibPal_rep1",
+"6_NHA1_TibPal_rep2",
+"7_NHA1_palmitato_rep1",
+"8_NHA1_palmitato_rep2",
+"9_NHA1_vehiculo_rep1",
+"10_NHA1_vehiculo_rep2",
+"11_NHA2_tibolona_rep1",
+"12_NHA2_tibolona_rep2",
+"13_NHA2_DMEM_rep1",
+"14_NHA2_DMEM_rep2",
+"15_NHA2_TibPal_rep1",
+"16_NHA2_TibPal_rep2",
+"17_NHA2_palmitato_rep1",
+"18_NHA2_palmitato_rep2",
+"19_NHA2_vehiculo_rep1",
+"20_NHA2_vehiculo_rep2",
+"21_NHA3_tibolona_rep1",
+"22_NHA3_tibolona_rep2",
+"23_NHA3_DMEM_rep1",
+"24_NHA3_DMEM_rep2",
+"25_NHA3_TibPal_rep1",
+"26_NHA3_TibPal_rep2",
+"27_NHA3_palmitato_rep1",
+"28_NHA3_palmitato_rep2",
+"29_NHA3_vehiculo_rep1",
+"30_NHA3_vehiculo_rep2")
+
+library("GenomicFeatures")
+gencode.v29.gtf <- makeTxDbFromGFF("gencode.v29.annotation.gtf.gz", "gtf", dataSource = "Gencode")
+# Select all transcripts
+allTX <- keys(gencode.v29.gtf, "TXNAME")
+# Filter all genes from which its TX exist
+mytx2gene <- select(gencode.v29.gtf, allTX, "GENEID", "TXNAME")
+
+vali <- tximport(files, type = "salmon", tx2gene = mytx2gene, ignoreAfterBar = T, txIn = TRUE, txOut = FALSE)
+
+# Lets remove the version number from the Ensembl IDs
+rownames(vali$abundance) <- str_replace(rownames(vali$abundance), pattern = ".[0-9]+$",replacement = "") 
+rownames(vali$counts) <- str_replace(rownames(vali$counts), pattern = ".[0-9]+$",replacement = "") 
+rownames(vali$length) <- str_replace(rownames(vali$length), pattern = ".[0-9]+$",replacement = "") 
+
+#saveRDS(vali, file = "Data/salmon_matrix_count.rds")
+```
+```{r include=F}
+vali <- readRDS(file = "Data/salmon_matrix_count.rds")
+```
+
+# Pre-processing
+## PCA
+It is always a good practice to visualise your data right away, prior to any further modification, just to get a sense of the behaviour of your dataset. 
+
+```{r}
+pc <- prcomp(t(vali$counts))
+# How it looks?
+pc$x[1:4, 1:3]
+
+# To set the colours in autoplot()
+pc2 <- cbind(pc$x, treatment=rep(1:5, 6))
+pc_plot <- autoplot(pc, label = T, label.size = 3, data = pc2, colour =  as.numeric(as.factor(rownames(pc$x)))) + theme_classic()
+pc_plot
+```
+```{r eval=F, include=F}
+# The plot is interactive!
+plotly::ggplotly(pc_plot)
+```
+
+Apparently, the factor sex carries the most information to segregate the samples. Therefore, it is important to correct for sex when extracting the effect of the treatments on gene expression.
+
+## Some relevant information
+
+How many genes are in the 30 samples?
+```{r}
+length(unique(rownames(vali$abundance)))
+```
+
+Is there any gene with 0 counts over the 30 samples?
+```{r}
+any(vali$length[vali$counts == 0])
+```
+
+Is there any gene with NAs ?
+```{r}
+any(is.na.data.frame(vali$abundance))
+```
+
+## Distribution of raw counts
+
+Lets explore the distribution of the counts
+```{r eval=FALSE, include=FALSE}
+# This code takes too much time
+ENSEMBl_keys <- str_replace(rownames(vali$counts),
+                        pattern = ".[0-9]+$",
+                        replacement = "")
+ENSEMBL2GENENAME <- AnnotationDbi::select(org.Hs.eg.db, keys = ENSEMBl_keys, keytype = "ENSEMBL", columns = c("GENENAME", "SYMBOL"))
+
+vali_counts_distribution <- as.data.frame(vali$counts) %>% rownames_to_column(var = "Ensembl") %>% gather("Sample", "Expression_level", -1) 
+vali_counts_distribution$Ensembl <- str_replace(vali_counts_distribution$Ensembl, pattern = ".[0-9]+$",replacement = "") 
+
+vali_counts_distribution <- left_join(vali_counts_distribution, ENSEMBL2GENENAME, by = c("Ensembl" = "ENSEMBL"))
+
+plot_ly(vali_counts_distribution, x = ~Sample, y = ~Expression_level, type = "box", hoverinfo = 'text', text = ~paste(SYMBOL, '</br>', '</br>', GENENAME))
+
+# This code takes too much time
+# Plot the distribution using ggplot2
+vali_counts_distribution_plot <- ggplot(data = vali_counts_distribution, aes(x= Sample, y = Expression_level)) + geom_boxplot() + theme_classic() + theme(axis.text.x = element_text(angle = 90, hjust = 1))
+ggsave("Results/Pre-processing/vali_counts_distribution.png", dpi = 300, height = 129, width = 197, units = "mm")
+
+plotly_dist <- ggplotly(vali_counts_distribution_plot)
+plotly_dist
+
+# This line of code is faster using the first line in the next chunk
+# Who is the top expressed gene in all samples?
+as.data.frame(vali$counts) %>% rownames_to_column(var = "Ensembl") %>% gather("Sample", "Expression_level", -1) %>% group_by(Sample) %>% slice(which.max(Expression_level))
+```
+
+```{r}
+par(mar=c(12,7,4,2))
+boxplot(vali$counts, xlab = "", ylab = "Expression (counts)", las=2) # to plot the distribution with outliers
+dev.off()
+```
+
+We cannot state nothing about the distribution as some outliers in the first nine samples are heavily influencing the scale, shrinking the boxplots. Lets look at these outliers closer:
+```{r}
+#Lets see who are the top 3 most highly expressed genes in all samples
+raw_outliers <- unique(rownames(vali$counts)[apply(vali$counts, 2, which.maxn, n = 3)])
+
+# What are their names
+mapIds(org.Hs.eg.db, keys = raw_outliers, keytype = "ENSEMBL", column = "GENENAME")
+# How the distribution will look like without outliers?
+par(mar=c(12,4,4,2))
+boxplot(vali$counts, outline = F, las=2, xlab = "", ylab = "Expression (counts)", names = colnames(vali$counts))
+dev.off()
+```
+
+Once the outliers are removed we can observe a fairly homogeneus distribution, though many samples deviate from the trend and upper quartiles dominate. Many of the outliers are [house keeping genes](https://www.cell.com/trends/genetics/fulltext/S0168-9525(13)00089-9), such as the "cytochrome c oxidase subunit I" and the "ubiquitin C", or are required for essential cellular functions, such as "Ferritin Heavy Chain 1" and "fibronectin".
+
+Outlier handling is implicitly performed by DESeq2 using the Cook's distance, so lets proceed with DESeq2.
+
+## Preparation for DESeq2
+
+Before importing the matrix of counts into DESeq2, we have to prepare the sampletable where the experimental desing is explained:
+```{r}
+sampleTable <- data.frame(
+  condition = factor(rep(c("tibolona", "DMEM", "TibPal", "palmitato", "vehiculo"), each = 2, time = 3), levels = c("tibolona", "DMEM", "TibPal", "palmitato", "vehiculo")),
+  cell = factor(rep(c("NHA1", "NHA2", "NHA3"), each = 10, time = 3, length.out = 30), levels = c("NHA1", "NHA2", "NHA3")),
+  sex = factor(rep(c("male", "female", "female"), each = 10, length.out = 30), levels = c("male", "female")),
+  tech_rep = factor(rep(1:15, times = 1, each = 2, length.out = 30))
+)
+kable(sampleTable)
+```
+
+```{r}
+# The variable of interest must be the last one
+x <- DESeqDataSetFromTximport(vali, sampleTable, ~ sex + condition)
+# The control level must be the first one
+x$condition <- relevel(x$condition, "vehiculo")
+```
+
+The last step is to collapse replicates because they usually exhibit a Poissonian variation, and by doing so, one can increase the statistical power by 1) precisely estimating the expression level and 2) increasing the counts for lowly expressed genes. Moreover, nor doing it, is falling pray of pseudosampling.
+```{r}
+x <- collapseReplicates(x, x$tech_rep, x$condition)
+# Rename the samples
+rownames(colData(x)) <- colnames(vali$counts)[rep(c(T, F), length.out = 30)]
+#saveRDS(x, "Data/x.rds")
+kable(as.data.frame(colData(x)))
+```
+
+Filtering genes with less than 10 reads in all samples
+```{r}
+x_morethan10 <- x[rowSums(counts(x)) >= 10, ]
+# How many genes after this filter?
+nrow(x_morethan10)
+```
+
+Transformations for the distribution of counts
+```{r}
+# rlog transformation
+#x_rld <- rlogTransformation(x_morethan10)
+#saveRDS(x_rld, "Data/x_rld.rds")
+x_rld <- readRDS("Data/x_rld.rds")
+
+# Log2 transformation
+par(mfrow = c( 3, 2 ))
+hist(counts(x_morethan10), main="Before log2", xlab = "Expression (counts)") # All samples
+hist(log2(counts(x_morethan10) + 1), main="After log2", xlab = "log2(counts)") # All samples +1 to avoid 0s
+
+boxplot(counts(x_morethan10), outline = F, main="Before log2", xlab = "Samples", ylab = "Expression (counts)") 
+boxplot(log2(counts(x_morethan10) + 1), main="After log2", xlab = "Samples", ylab = "log2(counts)")
+
+boxplot(counts(x_morethan10), outline = F, main="Before log2", xlab = "Samples", ylab = "Expression (counts)")
+boxplot(assay(x_rld), main="After rlog", xlab = "Samples", ylab = "rlog(counts)")
+dev.off()
+
+par(mfrow = c( 1, 2 ))
+plot(log2( 1 + counts(x_morethan10)[ , c(1,7)] ),
+     pch=16, cex=0.3, main = "log2")
+plot(assay(x_rld)[ , c(1,7)], pch=16, cex=0.3, main = "rlog")
+dev.off()
+```
+
+# Differential expression
+```{r}
+#dds <- DESeq(x_morethan10)
+```
+
+### Outliers
+
+Let's see how many genes are left after the outliers filter:
+```{r}
+mcols(dds)[["maxCooks"]]
+```
+
+Apparently, the Cook's distance was not calculated. This might be due to the addition of the covariate "sex" in the design formula, as for each confounding factor added, the Cook's distance call has to infer more parameters. Depending on the number of parameters to infer, the minimum sample size increases, resulting in our 3 reps -- the minimun sample size for no confounding factors-- per treatment being insufficient sample size (<https://support.bioconductor.org/p/89526/>, <https://support.bioconductor.org/p/96595/>, [wald.test() function](https://www.rdocumentation.org/packages/aod/versions/1.3.1/topics/wald.test)). 
+
+Lets see if that hypothesis is true. For that we are going to compare whether the slots `mcols(dds)[["maxCooks"]]` is present in the `dds` object with and without the covariate sex:
+
+```{r}
+#With the covariate 
+mcols(dds)[["maxCooks"]] # All of them are marked as NA because the distance was not even calculated due to not enough sample size
+
+# Without the covariate:
+x_nosex <- DESeqDataSetFromTximport(vali, sampleTable, ~ condition)
+x_nosex$condition <- relevel(x_nosex$condition, "vehiculo")
+x_nosex <- collapseReplicates(x_nosex, x_nosex$tech_rep, x_nosex$condition)
+x_nosex_morethan10 <- x_nosex[rowSums(counts(x_nosex)) >= 10, ]
+dds_nosex <- DESeq(x_nosex_morethan10)
+mcols(dds_nosex)[["maxCooks"]] # Now every gene has its cooks distance calculated
+
+# How many parameter have each one, including the intercept?
+dim(attributes(dds)$dispModelMatrix) #6
+dim(attributes(dds_nosex)$dispModelMatrix) #5
+```
+
+In conclusion, it seems plausible that the outliers were not excluded because of the addition of the covariate in the design formula. There might be other reasons explaining that phenomenon though. Following Michael Love suggestions (<https://support.bioconductor.org/p/89526/>, <https://support.bioconductor.org/p/96595/>),  the solution is to take the maxCooks values from the dds without the covariate and then manually filter the outliers out in the dds with the covariate. 
+
+<!--# However, if one calls apply(assays(dds)[["cooks"]],1,max) (note it is dds not dds_nosex) the Cook's distance values are returned. That is still an unaswered question. One might use such values to manually filter the outliers, however it will be wrong. Inasmuch as the Cook's cutoff calculation also depends on the number of parameters in the design, its value is different betwwen dds () and dds_nosex (). Therefore, the Coo'k cutoff to be used is going to be the one from dds_nosex. -->
+
+Moreover, the model with less number of parameters is preferred because reduces the number of degrees of freedom, but also because that is the dataset used to get the cook's distance values so, to mantain the consistency the Cook's cutoff is also going to be calculated using the number of parameters in `dds_nosex`. Following `?results`, the Cook's cutoff is going to be calculated using `qf(.99, p, m - p)`.
+
+```{r}
+maxCooks <- mcols(dds_nosex)[["maxCooks"]]
+#saveRDS(maxCooks, file = "Data/maxCooks_dds_nosex.rds")
+x_morethan10[maxCooks]
+# Calculating the cutoff
+p <- ncol(attributes(dds_nosex)$dispModelMatrix)
+m <- nrow(attributes(dds_nosex)$dispModelMatrix)
+maxCooks_cutoff <- qf(.99, p, m - p) # 5.636326
+# Filtering out outliers
+maxCooks <- maxCooks[maxCooks <= maxCooks_cutoff]
+nrow(x_morethan10)
+x_morethan10 <- x_morethan10[names(maxCooks), ]
+nrow(x_morethan10)
+```
+
+After this filter, 409 genes were excluded based on the Cook's distance, resulting in a total of 30758 genes. Let's correct `dds`:
+```{r}
+#dds <- DESeq(x_morethan10)
+dds <- readRDS("Data/dds.rds")
+```
+
+# Diagnostic plots
+## Dispersion shrinkage
+Let's appreciate the dispersion shrinkage done by DESeq2 to extract more signal from lowly expressed genes:
+```{r}
+plotDispEsts(dds)
+```
+
+<!--
+## Heatmap
+
+Let's start plotting the 100 genes with higher read counts
+```{r}
+# For visualisation is prefferred to use the transformed values
+#dds_rlog <- rlog(dds)
+dds_rlog <- readRDS("Data/dds_rlog.rds")
+
+#Selecting the genes
+topExpress <- order(rowMeans(counts(dds,normalized=TRUE)),decreasing=T)[1:100]
+mat <- assay(dds_rlog)[topExpress,]
+
+# z-score normalising to better appreciate the signal
+mat_zscore <- t(apply(mat, 1, function(x){(x - mean(x)) / sd(x)}))
+
+#Mapping IDs
+mapIDs <- gconvert(rownames(mat_zscore), organism = "hsapiens", target = "ENSG", filter_na = F) %>% select(c(target, name))
+mat_zscore <- mat_zscore %>% as.data.frame() %>% rownames_to_column("Ensembl") %>% left_join(mapIDs, by = c("Ensembl" = "target")) %>% column_to_rownames("name") %>% select(-Ensembl)
+
+# Plot
+pheatmap(mat_zscore, show_rownames = T, border_color = NA, clustering_distance_cols = "correlation", clustering_method = "ward.D2", clustering_distance_rows = "correlation", angle_col = 45)
+```
+
+And the most variable top 100 genes
+```{r}
+#Selecting the genes
+topVar <- order(rowVars(counts(dds,normalized=TRUE)), decreasing = T)[1:100]
+mat <- assay(dds_rlog)[topVar,]
+
+# z-score normalising to better appreciate the signal
+mat_zscore <- t(apply(mat, 1, function(x){(x - mean(x)) / sd(x)}))
+
+#Mapping IDs
+mapIDs <- gconvert(rownames(mat_zscore), organism = "hsapiens", target = "ENSG", filter_na = F) %>% select(c(target, name))
+mat_zscore <- mat_zscore %>% as.data.frame() %>% rownames_to_column("Ensembl") %>% left_join(mapIDs, by = c("Ensembl" = "target")) %>% column_to_rownames("name") %>% select(-Ensembl)
+
+# Plot
+pheatmap(mat_zscore, show_rownames = T, clustering_distance_rows = "correlation", border_color = NA, clustering_distance_cols = "correlation", clustering_method = "ward.D2", angle_col = 45, scale = "none")
+```
+
+### Functional enrichment
+
+What are the functions that might be varying between the groups?
+```{r}
+# Using ComplexHeatmap
+topVar <- order(rowVars(counts(dds,normalized=TRUE)), decreasing = T)[1:1000]
+mat <- assay(dds_rlog)[topVar,]
+mat_zscore <- t(apply(mat, 1, function(x){(x - mean(x)) / sd(x)}))
+
+#Mapping IDs
+mapIDs <- gconvert(rownames(mat_zscore), organism = "hsapiens", target = "ENSG", filter_na = F) %>% select(c(target, name))
+mat_zscore <- mat_zscore %>% as.data.frame() %>% rownames_to_column("Ensembl") %>% left_join(mapIDs, by = c("Ensembl" = "target")) %>% column_to_rownames("name") %>% select(-Ensembl) %>% as.matrix()
+
+row_ha <- rowAnnotation(functional = anno_empty(border = FALSE, 
+    width = unit(100, "mm")))
+
+ #Plotting. It is mandatory to select a row_split otherwise the next lapply call wont work
+ht <- Heatmap(mat_zscore, clustering_distance_rows = "pearson", clustering_distance_columns = "pearson", clustering_method_rows = "ward.D2", clustering_method_columns = "ward.D2", show_row_names = F, right_annotation = row_ha, show_column_dend = F, row_km = 5, row_title = NULL, show_parent_dend_line = FALSE, heatmap_legend_param = list(title = "Row Z-score", direction = "horizontal", title_position = "topcenter")); draw(ht)
+
+row_groups_ha <- lapply(1:length(row_order(ht)), function(i){
+  
+  gene_names <- row.names(mat_zscore[row_order(ht)[[i]],])
+  gost_group <- gost(gene_names, organism = "hsapiens", ordered_query = T)
+  source_term <- gost_group$result %>% group_by(source) %>% summarise(p_value = min(p_value), term = first(term_name)) %>% select(source, term)
+  source_term <- paste(source_term$source, source_term$term, sep = "_")
+  return(source_term)
+  
+})
+```
+```{r fig.height = 17, fig.width = 17}
+draw(ht, heatmap_legend_side = "bottom", annotation_legend_side = "bottom", merge_legend = TRUE)
+
+for(i in 1:length(row_groups_ha)) {
+    decorate_annotation("functional", slice = i, {
+        grid.rect(x = 0, width = unit(2, "mm"), gp = gpar(fill = i, col = NA), just = "left")
+        grid.text(paste(row_groups_ha[[i]], collapse = "\n"), x = unit(3, "mm"), just = "left", check.overlap = T)
+    })
+}
+```
+
+We can also give a closer look at the enrichment per group to see what are the functions that might be varying between them
+```{r}
+lapply(1:length(row_order(ht)), function(i){
+  
+  gene_names <- row.names(mat_zscore[row_order(ht)[[i]],]) 
+  gene_names <- gconvert(gene_names, organism = "hsapiens", target = "ENSG", filter_na = F)[,5]
+  gost_group <- gost(gene_names, organism = "hsapiens", ordered_query = T, evcodes = T)
+  
+  gost_group$result %>% select(-parents) %>% write.csv(file = paste0("Results/Differential_expression/topVar_1000_functional_group_", i, ".csv"))
+  
+  plotly_group <- gostplot(gost_group, interactive = T, capped = F)
+  htmlwidgets::saveWidget(plotly_group, paste0("topVar_1000_functional_group_", i, ".html"))
+
+})
+```
+
+Lets explore those most variable 1000 genes
+```{r}
+topVarGenes <- order(rowVars(counts(dds,normalized=TRUE)), decreasing = T)[1:1000]
+topVarGenes <- rownames(assay(dds_rlog))[topVarGenes]
+topVarGenes <- gconvert(topVarGenes, organism = "hsapiens", target = "ENSG", filter_na = F)[,5]
+topVarGenes_gost <- gost(topVarGenes, organism = "hsapiens", ordered_query = T)
+gostplot(topVarGenes_gost, interactive = T, capped = F)
+```
+```{r eval=F, include=F}
+#export the interactive plotly obejct as html
+topVarGenes_gost <- gostplot(topVarGenes_gost, interactive = T, capped = F)
+htmlwidgets::saveWidget(topVarGenes_gost, "topVarGenes_gost.html")
+```
+
+In general, heatmaps are not a good way to visualise our results as we have an unbalanced desing (i.e. 1 male, 2 female samples) with not enough samples. 
+-->
+## PCA
+
+```{r eval=F, include=F, }
+plotPCA(dds_rlog, intgroup="cell") + theme_classic()
+
+plotPCA(dds_rlog, intgroup="condition") + theme_classic()
+
+```
+```{r}
+pcaData <- plotPCA(dds_rlog, intgroup=c("condition", "cell"), returnData=TRUE)
+percentVar <- round(100 * attr(pcaData, "percentVar"))
+ggplot(pcaData, aes(PC1, PC2, shape=condition, colour=cell)) +
+  geom_point(size=3) +
+  xlab(paste0("PC1: ",percentVar[1],"% variance")) +
+  ylab(paste0("PC2: ",percentVar[2],"% variance")) +  coord_fixed() + theme_classic()
+#ggsave("Results/Differential_expression/PCA_intergroup.png", width = 200, height = 165, dpi = 300, units = "mm")
+```
+
+## Sample clustering
+
+```{r}
+# rlog normalised DESeq2 counts based on euclidean distance
+sampleDists <- dist(t(assay(dds_rlog)))
+
+sampleDistMatrix <- as.matrix(sampleDists)
+rownames(sampleDistMatrix) <- paste(dds$condition, dds$cell, sep="-")
+colnames(sampleDistMatrix) <- NULL
+colors <- colorRampPalette( rev(brewer.pal(9, "Blues")) )(255)
+pheatmap(sampleDistMatrix,
+         clustering_distance_rows=sampleDists,
+         clustering_distance_cols=sampleDists,
+         col=colors)
+```
+
+## MA
+
+```{r}
+plotMA(dds)
+```
+
+We can observe a fair number of significantly (FDR=0.1) DE genes (red dots) that comes primarily from highly expressed genes. However, the most extreme FC comes actually from lowly and middle expressed genes. Which is further supported with the shrinkage plot indicating that not only highly expressed genes are able to make a significant call but also lowly and middle expressed genes, though very lowly expressed ones fail.
+
+## Consensus cluster
+
+```{r results='hide'}
+# Median normalisation
+mednorm_consensus_hc <- sweep(assay(dds, normalized=T),1, apply(assay(dds, normalized=T),1,median,na.rm=T))
+
+# CC
+mednorm_consensus_hc <- ConsensusClusterPlus(mednorm_consensus_hc, seed = 123, reps = 1000, maxK = 10, clusterAlg = "hc", verbose = F, title = "Results/Differential_expression/", plot = "pdf")
+calcICL(mednorm_consensus_hc, title = "Results/Differential_expression/", plot = "pdf")
+```
+```{r results='hide'}
+pdf(file = "Results/Differential_expression/mednorm_consensus_hc_dendrogram_k5.pdf")
+plot(mednorm_consensus_hc[[5]]$consensusTree, names(mednorm_consensus_hc[[5]]$consensusClass), main = "Cluster Dendrogram for k = 5")
+dev.off()
+```
+
+### Significance of consensus clustering
+
+Once the clusters are created and the relevant features extracted the question that naturally arises is whether or not such clusters are statistically significant? or are they the result of pure random aggrupation? Lets assess this question using [pvclust](http://stat.sys.i.kyoto-u.ac.jp/prog/pvclust/), which 
+```{r}
+#THIS RUN TAKES TIME ! 1222.766 in a 24threads machine 1.8GHz
+
+#pvclust <- pvclust(assay(dds, normalized=T), parallel = TRUE, nboot = 10000)
+#plot(pvclust_x_rld)
+```
+
+Remarkably, `pvclust` was able to confirm the clustering previusly found with `ConsensusClustering` moreover, most clusters are highly significant (>95%) using both, the Approximately Unbiased p-value (AU) and the Bootstrap Probability p-value (BP). Lets see how the error of those pvalues behaves:
+```{r}
+#seplot(pvclust_x_rld)
+# to select bu clicking the cluster number
+# seplot(pvclust_x_rld,  identify=TRUE) # Clic finish in the top-right corner to exit
+```
+
+Overall most clusters have very low standard error (<7%), which is ideal therefore statistically supporting the existance of the clusters by cell line and by treatment, thus highlighting the effects of those factor on the expression profile.
+
+# Individual contrasts
+<!--## Selecting alpha and lfcThreshold
+To read on why to use the `lfcthreshold` argument (<https://support.bioconductor.org/p/101504/>, <https://support.bioconductor.org/p/73774/>, <https://support.bioconductor.org/p/107188/>, <https://support.bioconductor.org/p/104500/>).
+```{r}
+my_alpha <- 0.1
+my_lfcThreshold <- 1.5
+res_lfc <- results(dds, contrast = c("condition","palmitato", "vehiculo"), lfcThreshold = my_lfcThreshold, alpha = my_alpha)
+vulcano_lfc <- EnhancedVolcano::EnhancedVolcano(
+     res_alpha,
+     lab = rownames(res_lfc),
+     x = "log2FoldChange",
+     y = "padj",
+     FCcutoff = my_lfcThreshold,
+     pCutoff = my_alpha,
+     title = paste0("lfcThreshold = ", my_lfcThreshold, ", alpha = ", my_alpha),
+     subtitle = NULL, 
+     legendVisible = F,
+     caption = NULL)
+
+my_alpha <- 0.05
+my_lfcThreshold <- 1.5
+res_alpha_lfc <- results(dds, contrast = c("condition","palmitato", "vehiculo"), alpha = my_alpha, lfcThreshold = my_lfcThreshold)
+vulcano_alpha_lfc <- EnhancedVolcano::EnhancedVolcano(
+     res_alpha_lfc,
+     lab = rownames(res_alpha_lfc),
+     x = "log2FoldChange",
+     y = "padj",
+     FCcutoff = my_lfcThreshold,
+     pCutoff = my_alpha,
+     title = paste0("lfcThreshold = ", my_lfcThreshold, ", alpha = ", my_alpha),
+     subtitle = NULL, 
+     legendVisible = F,
+     caption = NULL)
+
+my_alpha <- 0.05
+my_lfcThreshold <- 0
+res_alpha <- results(dds, contrast = c("condition","palmitato", "vehiculo"), alpha = my_alpha)
+vulcano_alpha <- EnhancedVolcano::EnhancedVolcano(
+     res_alpha,
+     lab = rownames(res_alpha),
+     x = "log2FoldChange",
+     y = "padj",
+     FCcutoff = my_lfcThreshold,
+     pCutoff = my_alpha,
+     title = paste0("lfcThreshold = ", my_lfcThreshold, ", alpha = ", my_alpha),
+     subtitle = NULL, 
+     legendVisible = F,
+     caption = NULL)
+
+my_alpha <- 0.1
+my_lfcThreshold <- 0
+res_nothing <- results(dds, contrast = c("condition","palmitato", "TibPal"))
+vulcano_nothing <- EnhancedVolcano::EnhancedVolcano(
+     res_nothing,
+     lab = rownames(res_nothing),
+     x = "log2FoldChange",
+     y = "padj",
+     FCcutoff = my_lfcThreshold,
+     pCutoff = my_alpha,
+     title = paste0("lfcThreshold = ", my_lfcThreshold, ", alpha = ", my_alpha),
+     subtitle = NULL, 
+     legendVisible = F,
+     caption = NULL)
+
+grid.arrange(vulcano_nothing, vulcano_alpha, vulcano_lfc, vulcano_alpha_lfc, nrow = 2, ncol = 2, top = textGrob("palmitato VS vehiculo, different lfcThreshold values and alpha from results()",gp=gpar(fontsize=20,font=3)))
+
+###
+my_alpha <- 0.05
+my_lfcThreshold <- 0.5
+res_alpha_lfc_2 <- results(dds, contrast = c("condition","palmitato", "vehiculo"), alpha = my_alpha, lfcThreshold = my_lfcThreshold)
+vulcano_alpha_lfc_2 <- EnhancedVolcano::EnhancedVolcano(
+     res_alpha_lfc_2,
+     lab = rownames(res_alpha_lfc_2),
+     x = "log2FoldChange",
+     y = "padj",
+     FCcutoff = my_lfcThreshold,
+     pCutoff = my_alpha,
+     title = paste0("lfcThreshold = ", my_lfcThreshold, ", alpha = ", my_alpha),
+     subtitle = NULL, 
+     legendVisible = F,
+     caption = NULL)
+
+my_alpha <- 0.01
+my_lfcThreshold <- 0.5
+res_alpha_lfc_3 <- results(dds, contrast = c("condition","palmitato", "vehiculo"), alpha = my_alpha, lfcThreshold = my_lfcThreshold)
+vulcano_alpha_lfc_3 <- EnhancedVolcano::EnhancedVolcano(
+     res_alpha_lfc_3,
+     lab = rownames(res_alpha_lfc_3),
+     x = "log2FoldChange",
+     y = "padj",
+     FCcutoff = my_lfcThreshold,
+     pCutoff = my_alpha,
+     title = paste0("lfcThreshold = ", my_lfcThreshold, ", alpha = ", my_alpha),
+     subtitle = NULL, 
+     legendVisible = F,
+     caption = NULL)
+
+grid.arrange(vulcano_nothing, vulcano_alpha, vulcano_lfc, vulcano_alpha_lfc, vulcano_alpha_lfc_2, vulcano_alpha_lfc_3, nrow = 3, ncol = 2, top = textGrob("palmitato VS vehiculo, different lfcThreshold values and alpha from results()",gp=gpar(fontsize=20,font=3)))
+
+####
+
+my_alpha <- 0.1
+my_lfcThreshold <- 1
+res_alpha_lfc_4 <- results(dds, contrast = c("condition","palmitato", "vehiculo"), lfcThreshold = my_lfcThreshold)
+vulcano_alpha_lfc_4 <- EnhancedVolcano::EnhancedVolcano(
+     res_alpha_lfc_4,
+     lab = rownames(res_alpha_lfc_4),
+     x = "log2FoldChange",
+     y = "padj",
+     FCcutoff = my_lfcThreshold,
+     pCutoff = my_alpha,
+     title = paste0("lfcThreshold = ", my_lfcThreshold, ", alpha = ", my_alpha),
+     subtitle = NULL, 
+     legendVisible = F,
+     caption = NULL)
+
+my_alpha <- 0.05
+my_lfcThreshold <- 1
+res_alpha_lfc_5 <- results(dds, contrast = c("condition","palmitato", "vehiculo"), lfcThreshold = my_lfcThreshold)
+vulcano_alpha_lfc_5 <- EnhancedVolcano::EnhancedVolcano(
+     res_alpha_lfc_5,
+     lab = rownames(res_alpha_lfc_5),
+     x = "log2FoldChange",
+     y = "padj",
+     FCcutoff = my_lfcThreshold,
+     pCutoff = my_alpha,
+     title = paste0("lfcThreshold = ", my_lfcThreshold, ", alpha = ", my_alpha),
+     subtitle = NULL, 
+     legendVisible = F,
+     caption = NULL)
+
+my_alpha <- 0.01
+my_lfcThreshold <- 1
+res_alpha_lfc_6 <- results(dds, contrast = c("condition","palmitato", "vehiculo"), lfcThreshold = my_lfcThreshold)
+vulcano_alpha_lfc_6 <- EnhancedVolcano::EnhancedVolcano(
+     res_alpha_lfc_6,
+     lab = rownames(res_alpha_lfc_6),
+     x = "log2FoldChange",
+     y = "padj",
+     FCcutoff = my_lfcThreshold,
+     pCutoff = my_alpha,
+     title = paste0("lfcThreshold = ", my_lfcThreshold, ", alpha = ", my_alpha),
+     subtitle = NULL, 
+     legendVisible = F,
+     caption = NULL)
+
+grid.arrange(vulcano_nothing, vulcano_alpha, vulcano_lfc, vulcano_alpha_lfc, vulcano_alpha_lfc_2, vulcano_alpha_lfc_3, vulcano_alpha_lfc_4, vulcano_alpha_lfc_5, vulcano_alpha_lfc_6, nrow = 3, ncol = 3, top = textGrob("palmitato VS vehiculo, different lfcThreshold values and alpha from results()", gp = gpar(fontsize=20,font=3)))
+```
+-->
+<!--
+## DE counts for up and down expressed genes
+
+```{r}
+contrast_name <- list(c("condition","palmitato", "vehiculo"), c("condition","TibPal", "vehiculo"), c("condition", "tibolona", "TibPal"), c("condition","tibolona", "vehiculo"), c("condition", "palmitato", "tibolona"), c("condition", "palmitato", "TibPal"), c("condition", "palmitato", "TibPal"))
+
+my_alpha <- 0.05
+my_lfcThreshold <- 0.5 # 2^1.5=2.82 
+
+up_down_contrasts <- MyRfunctions::my_up_down(dds_path = dds, contrast_name = contrast_name, my_lfcThreshold = my_lfcThreshold, my_alpha = my_alpha)
+
+# Formating the data
+up_down_contrasts <- up_down_contrasts %>% tidyr::gather("Type_genes", "No_genes", up, down) %>% mutate(Percentage = ifelse(Type_genes == "up", up_percent, down_percent)) %>% select(-c(up_percent, down_percent))
+
+ggplot(up_down_contrasts, aes(x = contrast, y = No_genes, fill = Type_genes)) + geom_bar(stat = "identity", position=position_dodge()) + scale_fill_manual(values = c("blue", "red")) + theme_classic() + theme(axis.text.x = element_text( angle=45, hjust=1 )) + geom_text(aes(label=paste0(round(Percentage, 0), "%")), vjust=-0.2, size=3, position = position_dodge(width = 1)) + labs(x = element_blank(), y = "Number of genes", fill = "Expression")
+ggsave(paste0("Results/Individual_contrasts/up_down_contrasts_alpha", my_alpha, "_lfcThreshold", my_lfcThreshold, ".png"), width = 10.5, height = 8)
+```
+-->
+<!--
+## Summary: csv and heatmap
+```{r}
+contrast_name <- list(c("condition","palmitato", "vehiculo"), c("condition","TibPal", "vehiculo"), c("condition", "tibolona", "TibPal"), c("condition","tibolona", "vehiculo"), c("condition", "palmitato", "tibolona"), c("condition", "palmitato", "TibPal"), c("condition", "palmitato", "TibPal"))
+
+my_alpha <- 0.05
+my_lfcThreshold <- 0.5 # 2^0.5=1.45
+
+MyRfunctions::my_dds_summaries(
+  dds_path = dds,
+  dds_rlog_path = dds_rlog,
+  contrast_name = contrast_name,
+  output_path = "Results/Individual_contrasts/alpha0.05_lfcThreshold1.5/",
+  my_alpha = my_alpha,
+  my_lfcThreshold = my_lfcThreshold
+)
+```
+-->
+## Vulcano plots
+
+```{r}
+contrast_name <- list(c("condition","palmitato", "vehiculo"), c("condition","TibPal", "vehiculo"))
+my_alpha <- 0.05
+my_lfcThreshold <- 0.5 # 2^0.5=1.45
+MyRfunctions::my_vulcano(
+    dds_path = dds,
+    contrast_name = contrast_name,
+    my_alpha = my_alpha,
+    my_lfcThreshold = my_lfcThreshold,
+    output_pdf_path = "Results/Individual_contrasts/alpha0.05_lfcThreshold0.5/")
+```
+
+## MA plots
+
+```{r}
+contrast_name <- list(c("condition","palmitato", "vehiculo"), c("condition","TibPal", "vehiculo"))
+my_alpha <- 0.05
+my_lfcThreshold <- 0.5 # 2^0.5=1.45
+MyRfunctions::my_plotMA(
+    dds_path = dds,
+    contrast_name = contrast_name,
+    my_alpha = my_alpha,
+    my_lfcThreshold = 1.5,
+    output_pdf_path = "Results/Individual_contrasts/alpha0.05_lfcThreshold0.5/")
+```
+
+<!--
+## Union of all DE genes
+To be able to compare against the DE per contrast lets see how many DE genes are detected at specific alpha and lfcThreshold
+```{r}
+consensus_DE <- MyRfunctions::my_all_DE(
+  dds_path = dds,
+  contrast_name = contrast_name,
+  my_alpha = my_alpha,
+  my_lfcThreshold = my_lfcThreshold
+)
+write.csv(consensus_DE, paste0("Results/Individual_contrasts/alpha0.05_lfcThreshold1.5/consensus_DE_alpha", my_alpha, "_lfcThreshold", my_lfcThreshold, ".csv"), row.names = F)
+
+
+DE_per_contrast <- MyRfunctions::my_DE_per_contrast(
+  dds_path = dds,
+  contrast_name = contrast_name,
+  my_alpha = my_alpha,
+  my_lfcThreshold = my_lfcThreshold
+)
+names(DE_per_contrast) <- c("palmitatoVSvehiculo", "TibPalVSvehiculo", "tibolonaVSTibPal", "tibolonaVSvehiculo", "palmitatoVStibolona")
+
+DE_per_contrast2 <- list.append(DE_per_contrast, Consensus = consensus_DE$Ensembl)
+
+#venn.diagram(DE_per_contrast, "Results/Individual_contrasts/venn.diagram.tiff")
+```
+-->
+
+<!--
+# Single-gene counts
+
+## PA and Tibolone
+Lets explore some already tibolone and PA linked genes separately:
+```{r message=F}
+# Care must be taken to do not include spaces before or after the gene name
+genes_ensembl <- c("ENSG00000026025", "ENSG00000198836", "ENSG00000087470", "ENSG00000137288", "ENSG00000214253", "ENSG00000198888", "ENSG00000198763", "ENSG00000164916", "ENSG00000165553", "ENSG00000091831", "ENSG00000140009", "ENSG00000171791", "ENSG00000168610", "ENSG00000109320",  "ENSG00000115008", "ENSG00000125730", "ENSG00000173372")
+
+per_gene_plot <- MyRfunctions::my_plotCounts(ensembl = genes_ensembl, dds.object = dds, pdf.name = "Results/Single_gene_plots/PA_and_Tib_genes.pdf")
+
+grid.arrange(grobs = per_gene_plot[1:4], ncol = 2)
+
+```
+
+## Mitochondrial specific genes
+
+```{r message=F}
+Mitochondrial_genes <- read_csv("Data/Mitochondrial_genes.csv", col_names = FALSE)
+Mitochondrial_genes$X1 <- str_replace(Mitochondrial_genes$X1, pattern = ".[0-9]+$",replacement = "")
+
+genes_ensembl <- Mitochondrial_genes$X1
+
+mito_per_gene_plot <- MyRfunctions::my_plotCounts(ensembl = genes_ensembl, dds.object = dds, pdf.name = "Results/Single_gene_plots/Mitochondrial_genes.pdf")
+
+grid.arrange(grobs = mito_per_gene_plot[1:4], ncol = 2)
+```
+
+## Liddelow (2017) genes
+```{r message=F}
+genes_ensembl <- c("ENSG00000168610", "ENSG00000109320",  "ENSG00000115008", "ENSG00000125730", "ENSG00000173372",  "ENSG00000153208", "ENSG00000145794", "ENSG00000076716", "ENSG00000183098", "ENSG00000147257", "ENSG00000152583", "ENSG00000137801",  "ENSG00000186340", "ENSG00000112164", "ENSG00000149131", "ENSG00000162645", "ENSG00000102265")
+
+per_gene_plot <- MyRfunctions::my_plotCounts(ensembl = genes_ensembl, dds.object = dds, pdf.name = "Results/Single_gene_plots/Liddelow.pdf")
+
+```
+-->
+# paVSveh
+
+Lets start by performing an enrichment of all the genes (both up and down)
+```{r}
+my_alpha <- 0.05
+my_lfcThreshold <- 0.5
+palmitato <- results(dds, contrast = c("condition","palmitato", "vehiculo"), lfcThreshold = my_lfcThreshold, alpha = my_alpha, tidy = T)
+names(palmitato)[1] <- "ensembl_gene_id"
+palmitato <- filter(palmitato, padj <= my_alpha, log2FoldChange >= my_lfcThreshold | log2FoldChange <= -my_lfcThreshold)
+
+ensembl <- useMart("ensembl",dataset="hsapiens_gene_ensembl")
+mart_info <-
+  biomaRt::getBM(
+    attributes = c("ensembl_gene_id", "entrezgene_id", "external_gene_name", "gene_biotype"),
+    filters = "ensembl_gene_id",
+    values = palmitato$ensembl_gene_id,
+    mart = ensembl
+  )
+palmitato <- left_join(palmitato, mart_info, by = "ensembl_gene_id") %>% distinct(ensembl_gene_id, .keep_all = TRUE)
+write.csv(palmitato, file = "Results/Individual_contrasts/alpha0.05_lfcThreshold0.5/palmitato_vs_vehiculo_alpha0.05_lfcThreshold0.5.csv", row.names = F)
+
+# Enrichment for up expressed genes
+palmitato_up <- filter(palmitato, log2FoldChange >= 0)
+palmitato_up_gost <- gprofiler2::gost(palmitato_up$ensembl_gene_id, organism = "hsapiens", ordered_query = T, custom_bg = rownames(assay(dds)))
+palmitato_up_gost_manhattan <- gostplot(palmitato_up_gost, interactive = F, capped = F)
+publish_gostplot(p = palmitato_up_gost_manhattan, filename = "Results/Individual_contrasts/alpha0.05_lfcThreshold0.5/palmitato_up_gost_manhattan.jpeg", highlight_terms= palmitato_up_gost$result %>% arrange(p_value) %>% head(10) %>% dplyr::select(term_id))
+
+palmitato_up_gost <- palmitato_up_gost$result
+palmitato_up_gost[sapply(palmitato_up_gost, is.list)] <- apply(
+  palmitato_up_gost[sapply(palmitato_up_gost, is.list)],
+  1, function(x)
+    paste(unlist(x),
+      sep = ", ", collapse = ", "
+    )
+)
+write_csv(palmitato_up_gost, path = "Results/Individual_contrasts/alpha0.05_lfcThreshold0.5/palmitato_up_gost.csv")
+
+palmitato_up_gost_plot <- palmitato_up_gost %>% group_by(source) %>% filter(!source %in% c("TF", "MIRNA")) %>% top_n(10, desc(p_value)) %>% ungroup() %>% arrange(source, p_value)
+
+ggplot(palmitato_up_gost_plot, aes(x = fct_reorder(term_name, p_value), y = -log10(p_value), fill=source), split='source') + geom_col() + theme(axis.text.x=element_text(angle=-40, hjust=0)) + facet_grid(.~source, scale="free_x")
+ 
+ 
+WEGO2 <- palmitato_up_gost %>% group_by(source) %>% filter(!source %in% c("TF", "MIRNA")) %>% top_n(10, desc(p_value)) %>% ungroup() %>% arrange(source, p_value)
+
+ggplot(data = WEGO2, aes(x = fct_reorder(term_id, desc(p_value)), y = p_value, fill = source)) + geom_col(aes(x = fct_reorder(term_name, desc(p_value)))) 
+
+
+# Enrichment for down expressed genes
+palmitato_down <- filter(palmitato, log2FoldChange <= 0)
+palmitato_down_gost <- gprofiler2::gost(palmitato_down$ensembl_gene_id, organism = "hsapiens", ordered_query = T)
+palmitato_down_gost_manhattan <- gostplot(palmitato_down_gost, interactive = F, capped = F)
+publish_gostplot(p = palmitato_down_gost_manhattan, filename = "Results/Individual_contrasts/alpha0.05_lfcThreshold0.5/palmitato_down_gost_manhattan.jpeg", highlight_terms= palmitato_down_gost$result %>% arrange(p_value) %>% head(10) %>% dplyr::select(term_id))
+
+palmitato_down_gost <- palmitato_down_gost$result
+palmitato_down_gost[sapply(palmitato_down_gost, is.list)] <- apply(
+  palmitato_down_gost[sapply(palmitato_down_gost, is.list)],
+  1, function(x)
+    paste(unlist(x),
+      sep = ", ", collapse = ", "
+    )
+)
+write_csv(palmitato_down_gost, path = "Results/Individual_contrasts/alpha0.05_lfcThreshold0.5/palmitato_down_gost.csv")
+
+
+palmitato_gost %>% arrange(p_value) %>% head(20) %>% dplyr::select(p_value, term_name) %>% mutate(term_name = factor(term_name, levels=unique(as.character(term_name))), log2_pvalue = log2(p_value)+1) %>% ggplot(aes(x = term_name, y = log2_pvalue)) + geom_bar(stat="identity") + coord_flip() + theme_minimal() 
+ggsave(filename = "Results/Individual_contrasts/alpha0.05_lfcThreshold0.5/palmitato_gost_plot.jpeg")
+
+ggplot(palmitato_gost, aes(ID, Count, fill=ONTOLOGY), split='ONTOLOGY') + geom_col()  + 
+    theme(axis.text.x=element_text(angle=-40, hjust=0)) + facet_grid(.~ONTOLOGY, scale="free_x")
+```
+
+# What is the effect of tibolone
+```{r}
+my_alpha <- 0.05
+my_lfcThreshold <- 0.5
+palmitato <- results(dds, contrast = c("condition","palmitato", "vehiculo"), lfcThreshold = my_lfcThreshold, alpha = my_alpha, tidy = T)
+names(palmitato)[1] <- "ensembl_gene_id"
+
+joint <- results(dds, contrast = c("condition","TibPal", "vehiculo"), lfcThreshold = my_lfcThreshold, alpha = my_alpha, tidy = T)
+names(joint)[1] <- "ensembl_gene_id"
+
+# Joining only the LFC values for the 30758 genes
+LFC_pa_joint <- left_join(palmitato, joint, by = "ensembl_gene_id", suffix = c("_pa", "_joint")) %>% select(ensembl_gene_id, log2FoldChange_pa, padj_pa, log2FoldChange_joint, padj_joint ) %>% rename(ensembl_gene_id = ensembl_gene_id)
+
+# Lets plot the LFC
+plot(y = LFC_pa_joint$log2FoldChange_joint - LFC_pa_joint$log2FoldChange_pa, x = LFC_pa_joint$log2FoldChange_pa, xlab="log(FC_palmitato)", ylab="log(FC_joint) - log(FC_palmitato)")
+plot(y = LFC_pa_joint$log2FoldChange_joint, x = LFC_pa_joint$log2FoldChange_pa, xlab="log(FC_palmitato)", ylab="log(FC_joint)")
+abline(h=0)
+
+# Filtering by the genes significant only in PA, thereby capturing the genes in the joint that were reversed back to the normal values and therefore have non-significant padj
+LFC_pa_joint <- LFC_pa_joint %>% filter(padj_pa <= my_alpha)
+
+ensembl <- useMart("ensembl",dataset="hsapiens_gene_ensembl")
+mart_info <-
+  biomaRt::getBM(
+    attributes = c("ensembl_gene_id", "entrezgene_id", "external_gene_name", "gene_biotype"),
+    filters = "ensembl_gene_id",
+    values = palmitato$ensembl_gene_id,
+    mart = ensembl
+  )
+LFC_pa_joint <- left_join(LFC_pa_joint, mart_info, by = "ensembl_gene_id") %>% distinct(ensembl_gene_id, .keep_all = TRUE)
+
+# We will use the difference beetwn the LFC of PA and joint later
+LFC_pa_joint$log2FoldChange_diff <- abs(LFC_pa_joint$log2FoldChange_joint - LFC_pa_joint$log2FoldChange_pa)
+
+# Export the table
+write.csv(LFC_pa_joint, "Results/Individual_contrasts/alpha0.05_lfcThreshold0.5/LFC_pa_joint_no_outliers.csv", row.names = F)
+
+plot(y = LFC_pa_joint$log2FoldChange_joint, x = LFC_pa_joint$log2FoldChange_pa, xlab="LFC_palmitato", ylab="LFC_joint");abline(h=0)
+
+# Now the plot looks cleaner and we can extract information from it: 1) Some genes up expressed by PA tend to be downexpressed by Tibolone 2) More genes, however, tend to be up-expressed by PA and also up by Tib though the magnitude of change is lower in Tib
+
+#Lets plot a dubmbell plot to better represent the idea of PA vs Tib actions
+
+LFC_pa_joint$ensembl_gene_id <- factor(LFC_pa_joint$ensembl_gene_id, levels = LFC_pa_joint$ensembl_gene_id[order(LFC_pa_joint$log2FoldChange_pa)]) 
+
+ggplot(LFC_pa_joint, aes(y = ensembl_gene_id, x = log2FoldChange_joint, xend =log2FoldChange_pa)) + ggalt::geom_dumbbell(size_x=3.5, size_xend = 3.5,colour_x="#56B4E9", colour_xend = "#E69F00", size=0.1) + theme(axis.text.y=element_blank(), axis.ticks.y=element_blank()) + scale_x_continuous(breaks = c(1, 5, 10, 15, -1, -5, -10)) + labs(x = "LFC of Palmitic Acid (yellow) and Palmitic Acid+Tibolone (blue)", y = "Gene") + geom_vline(xintercept = 0)
+
+####
+# AUC calculation https://stackoverflow.com/questions/4954507/calculate-the-area-under-a-curve
+
+# #Out of the genes significant in PA, extract the reversed ones (i.e. those below the curves, not the ones above them)
+# LFC_pa_joint_upInPA <- LFC_pa_joint %>% filter(log2FoldChange_pa >= 0, log2FoldChange_joint <= log2FoldChange_pa)
+# LFC_pa_joint_downInPA <- LFC_pa_joint %>% filter(log2FoldChange_pa <= 0, log2FoldChange_joint >= log2FoldChange_pa)
+# LFC_pa_joint <- bind_rows(LFC_pa_joint_upInPA, LFC_pa_joint_downInPA) %>% arrange(log2FoldChange_pa)
+
+LFC_pa_joint <- read.csv("Results/Individual_contrasts/alpha0.05_lfcThreshold0.5/LFC_pa_joint_no_outliers.csv")
+
+# Calculations
+sum(diff(1:length(LFC_pa_joint$log2FoldChange_joint)) * (head(abs(LFC_pa_joint$log2FoldChange_joint),-1)+tail(abs(LFC_pa_joint$log2FoldChange_joint),-1)))/2
+#OR
+auc_joint <- MESS::auc(1:length(LFC_pa_joint$log2FoldChange_joint),abs(LFC_pa_joint$log2FoldChange_joint)) # 593.18
+auc_pa <- MESS::auc(1:length(LFC_pa_joint$log2FoldChange_pa),abs(LFC_pa_joint$log2FoldChange_pa)) # 893.2804
+# What is the percentage of the PA auc covered by the joint auc?
+(auc_joint*100)/auc_pa # 
+# How much of the pa effectwas reversed by Tib?
+100-(auc_joint*100)/auc_pa # 33.59531%
+#Is that difference significant? What test can I use to assess that?
+
+# AUC based on sum of LFC
+#Adding |LFC|
+auc_joint <- sum(abs(LFC_pa_joint$log2FoldChange_joint)) #596.4856
+auc_pa <- sum(abs(LFC_pa_joint$log2FoldChange_pa)) #903.4057
+100-(auc_joint*100)/auc_pa # 33.97367%
+
+### Threshold for difference
+# First approach
+  thor <- 0
+  x <- min(LFC_pa_joint$log2FoldChange_pa)
+  while (x < max(LFC_pa_joint$log2FoldChange_pa)) {
+    
+  x <- 1:max(x) + 1 ; x <- max(x)
+  
+  odin <- LFC_pa_joint %>% filter(log2FoldChange_pa >= x-1 & log2FoldChange_pa < x)
+  thor <- c(thor, ((sum(odin$log2FoldChange_pa) - sum(odin$log2FoldChange_joint)) * 100)/sum(odin$log2FoldChange_pa))
+  }
+  plot(thor, xlab = "bin of 1 unit on PA LFC", ylab = "Percentage of reversal")
+
+# First approach
+  boxplot(LFC_pa_joint$log2FoldChange_diff)
+  summary(LFC_pa_joint$log2FoldChange_diff)
+
+### Lets explore the genes
+# What are the genes that the joint treatment reverses the most?
+LFC_pa_joint %>% filter(log2FoldChange_diff >= quantile(log2FoldChange_diff, 0.75)) %>% arrange(desc(log2FoldChange_diff)) %>% write.csv(x=., file = "Results/Individual_contrasts/alpha0.05_lfcThreshold0.5/LFC_pa_joint_no_outliers_significant_in_PA_MostReversed_0.75LFCdiff.csv", row.names = F)
+
+# Out of the genes upexpressed by PA, how many are reversed by the joint
+upGenes_ByPa <- LFC_pa_joint_upInPA %>% filter(log2FoldChange_diff >= quantile(log2FoldChange_diff, 0.75)) %>% arrange(desc(log2FoldChange_diff))
+write.csv(upGenes_ByPa, file = "Results/Individual_contrasts/alpha0.05_lfcThreshold0.5/upGenes_ByPa.csv", row.names = F)
+
+# Out of the genes downexpressed by PA, how many are reversed by the joint
+downGenes_ByPa <- LFC_pa_joint_downInPA %>% filter(log2FoldChange_diff >= quantile(log2FoldChange_diff, 0.75)) %>% arrange(desc(log2FoldChange_diff))
+
+### Let's do some enrichments of these genes
+## up in PA and reversed by Joint
+upGenes_ByPa_gost <- gprofiler2::gost(upGenes_ByPa$ensembl_gene_id, organism = "hsapiens", ordered_query = T, exclude_iea = T, custom_bg =rownames(assay(dds)))
+upGenes_ByPa_gost_manhattan <- gostplot(upGenes_ByPa_gost, interactive = T, capped = F)
+publish_gostplot(p = upGenes_ByPa_gost_manhattan, filename = "Results/Individual_contrasts/alpha0.05_lfcThreshold0.5/upGenes_ByPa_gost_manhattan.jpeg", highlight_terms= upGenes_ByPa_gost$result %>% arrange(p_value) %>% head(20) %>% dplyr::select(term_id))
+
+upGenes_ByPa_gost <- upGenes_ByPa_gost$result
+upGenes_ByPa_gost[sapply(upGenes_ByPa_gost, is.list)] <- apply(
+  upGenes_ByPa_gost[sapply(upGenes_ByPa_gost, is.list)],
+  1, function(x)
+    paste(unlist(x),
+      sep = ", ", collapse = ", "
+    )
+)
+write_csv(upGenes_ByPa_gost, path = "Results/Individual_contrasts/alpha0.05_lfcThreshold0.5/upGenes_ByPa_gost.csv")
+```
+
+# Tibolone contrast
+```{r}
+# Counts
+vali <- readRDS(file = "Data/salmon_matrix_count.rds")
+vali$abundance <- vali$abundance[,grep("DMEM|tibolona",colnames(vali$abundance))]
+vali$counts <- vali$counts[,grep("DMEM|tibolona",colnames(vali$counts))]
+vali$length <- vali$length[,grep("DMEM|tibolona",colnames(vali$length))]
+
+# Design table
+sampleTable <- data.frame(
+  condition = factor(rep(c("tibolona", "DMEM"), each = 2, time = 3), levels = c("tibolona", "DMEM")),
+  cell = factor(rep(c("NHA1", "NHA2", "NHA3"), each = 4, time = 3, length.out = 12), levels = c("NHA1", "NHA2", "NHA3")),
+  sex = factor(rep(c("male", "female", "female"), each = 4, time = 3, length.out = 12), levels = c("male", "female")),
+  tech_rep = factor(rep(1:6, times = 1, each = 2, length.out = 12))
+)
+
+# Preparation for DESeq2
+x <- DESeqDataSetFromTximport(vali, sampleTable, ~ sex + condition)
+x$condition <- relevel(x$condition, "DMEM")
+x <- collapseReplicates(x, x$tech_rep, x$condition)
+rownames(colData(x)) <- colnames(vali$counts)[rep(c(T, F), length.out = 12)]
+nrow(x) #58294
+x_morethan10 <- x[rowSums(counts(x)) >= 10, ]
+nrow(x_morethan10) #25253
+
+# differential expression
+dds <- DESeq(x_morethan10)
+
+# Check if any gene was excluded for being an outlier
+nrow(assay(dds)) # Apparently no gene was excluded
+
+# Outliers 
+x_nosex <- DESeqDataSetFromTximport(vali, sampleTable, ~ condition)
+x_nosex$condition <- relevel(x_nosex$condition, "DMEM")
+x_nosex <- collapseReplicates(x_nosex, x_nosex$tech_rep, x_nosex$condition)
+x_nosex_morethan10 <- x_nosex[rowSums(counts(x_nosex)) >= 10, ]
+dds_nosex <- DESeq(x_nosex_morethan10)
+maxCooks <- mcols(dds_nosex)[["maxCooks"]]
+x_morethan10[maxCooks]
+# Calculating the cutoff
+p <- ncol(attributes(dds_nosex)$dispModelMatrix)
+m <- nrow(attributes(dds_nosex)$dispModelMatrix)
+maxCooks_cutoff <- qf(.99, p, m - p) # 5.636326
+# Filtering out outliers
+maxCooks <- maxCooks[maxCooks <= maxCooks_cutoff]
+nrow(x_morethan10) #25253
+x_morethan10 <- x_morethan10[names(maxCooks), ]
+nrow(x_morethan10) #25066
+
+# Differential expression without outliers
+dds <- DESeq(x_morethan10)
+
+# Extract results 
+my_alpha <- 0.05
+my_lfcThreshold <- 0.5
+tibolone <- results(dds, contrast = c("condition","tibolona", "DMEM"), lfcThreshold = my_lfcThreshold, alpha = my_alpha, tidy = T)
+names(tibolone)[1] <- "ensembl_gene_id"
+tibolone <- filter(tibolone, padj <= my_alpha, log2FoldChange >= my_lfcThreshold | log2FoldChange <= -my_lfcThreshold)
+
+ensembl <- useMart("ensembl",dataset="hsapiens_gene_ensembl")
+mart_info <-
+  biomaRt::getBM(
+    attributes = c("ensembl_gene_id", "entrezgene_id", "external_gene_name", "gene_biotype"),
+    filters = "ensembl_gene_id",
+    values = tibolone$ensembl_gene_id,
+    mart = ensembl
+  )
+tibolone <- left_join(tibolone, mart_info, by = "ensembl_gene_id") %>% distinct(ensembl_gene_id, .keep_all = TRUE)
+write.csv2(tibolone, file = "Results/Individual_contrasts/alpha0.05_lfcThreshold0.5/Tibolone/tibolone_vs_DMEM_alpha0.05_lfcThreshold0.5.csv", row.names = F)
+
+```
+
+<!--
+```{r}
+#https://www.biostars.org/p/299161/
+paVSveh <- read_csv("Results/Individual_contrasts/alpha0.05_lfcThreshold0.5/condition_palmitato_vs_vehiculo_alpha0.05_lfcThreshold0.5.csv")
+DAVID <- read_delim("~/Desktop/Genesets/paVSveh_a05_lfc1.5_DAVID.tsv", "\t", escape_double = FALSE, trim_ws = TRUE)
+sigGeneList <- paVSveh$Ensembl
+topTable <- paVSveh %>% arrange(desc(padj))
+
+enrichBcutoff <- 0.05
+DAVID <- DAVID %>% filter(Benjamini < enrichBcutoff, Count >= 10, Category != "UP_KEYWORDS", Category != "UP_SEQ_FEATURE", Category != "Chronic renal failure|Kidney Failure, Chronic")
+
+annGSEA <- data.frame(row.names=sigGeneList) 
+
+for (j in 1:length(sigGeneList))
+{
+    #Create a matching pattern to ensure genes match exactly
+    #   ^GENE,  -> Match at beginning of matching string
+    #   , GENE$ -> Match at end of matching string
+    #    GENE,  -> Match between first and last gene in matching string
+    gene <- sigGeneList[j]
+    pattern <- paste("^", gene, ", |, ", gene, "$| ", gene, ",", sep="")
+    for (k in 1:nrow(DAVID)) {
+        if (any(grepl(pattern, DAVID$Genes[k]))) {
+            annGSEA[j,k] <- 1
+        }
+        else
+        {
+            annGSEA[j,k] <- 0
+        }
+    }
+}
+
+colnames(annGSEA) <- unlist(DAVID[,2], use.names = F)
+
+#Remove terms with no overlapping genes
+annGSEA <- annGSEA[,apply(annGSEA, 2, mean)!=0]
+
+#Remove genes with no overlapping terms
+annGSEA <- annGSEA[apply(annGSEA, 1, mean)!=0,]
+
+require(ComplexHeatmap)
+require(circlize)
+
+#Match the order of rownames in toptable with that of annGSEA
+topTable <- topTable[which(topTable$Ensembl %in% rownames(annGSEA)),]
+topTable <- topTable[match(rownames(annGSEA), topTable$Ensembl),]
+
+#Set text and figure dimensions
+geneLab=10
+termLab=8
+
+#Create heatmap annotations
+    #Colour bar for -log (base 10) FDR Q value for DEGs, and fold changes
+    dfMinusLog10FDRGenes <- data.frame(-log10(topTable[which(topTable$Ensembl %in% rownames(annGSEA)),"padj"]))
+    dfMinusLog10FDRGenes[dfMinusLog10FDRGenes=="Inf"] <- 0
+    dfFoldChangeGenes <- data.frame(topTable[which(topTable$Ensembl %in% rownames(annGSEA)),"log2FoldChange"])
+    dfGeneAnno <- data.frame(dfMinusLog10FDRGenes, dfFoldChangeGenes)
+    colnames(dfGeneAnno) <- c("DEG\nsignificance\nscore", "Regulation")
+    dfGeneAnno[,2] <- ifelse(dfGeneAnno[,2]>0, "Up-regulated", "Down-regulated")
+    colours <- list("Regulation"=c("Up-regulated"="royalblue", "Down-regulated"="yellow"))
+    haGenes <- rowAnnotation(df=dfGeneAnno, col=colours, width=unit(1,"cm"))
+    
+    #Colour bar for -log (base 10) Benjamini enrichment Q value
+    dfMinusLog10BenjaminiTerms <- data.frame(-log10(DAVID[which(DAVID$Term %in% colnames(annGSEA)),"Benjamini"]))
+    colnames(dfMinusLog10BenjaminiTerms) <- "GO Term\nsignificance\nscore"
+    haTerms <- HeatmapAnnotation(df=dfMinusLog10BenjaminiTerms,
+        colname=anno_text(colnames(annGSEA), rot=40, just="right", offset=unit(1,"npc")-unit(2,"mm"), gp=gpar(fontsize=termLab)),
+        annotation_height=unit.c(unit(1, "cm"), unit(8, "cm")))
+    
+    rownames(paVSveh) <- paVSveh$Ensembl
+    paVSveh2 <- paVSveh %>% filter(Ensembl %in% rownames(annGSEA)) %>% dplyr::select(name)
+    
+    rownames(annGSEA) <- unlist(paVSveh2)
+    
+    
+    hmapGSEA <-
+      Heatmap(
+        annGSEA,
+        name = "My enrichment",
+        show_row_names = T,
+        left_annotation = haGenes,
+        clustering_distance_columns = "euclidean",
+        clustering_method_columns = "ward.D2",
+        clustering_distance_rows = "euclidean",
+        clustering_method_rows = "ward.D2",
+        bottom_annotation = haTerms,
+        col = c("0" = "white", "1" = "forestgreen"),
+        show_heatmap_legend = FALSE,
+        show_column_names = FALSE,
+        show_row_dend = F,
+        show_column_dend = F,
+        row_title = "Statistically-significant genes",
+        column_title = "Enriched terms",
+        rect_gp = gpar(col = "grey85")
+      )
+    draw(hmapGSEA,
+         heatmap_legend_side = "right",
+         annotation_legend_side = "right")
+```
+-->
+
+<!--
+# PAup_TIBdown_TIBPALup 
+```{r}
+# Extract the genes from the intersect. These 60 genes are the same when comparing against TibPal_up
+PA_Tib_intersect <- getIntersection(gom.obj["PA_up", "Tib_down"])
+
+mat <- assay(dds_rlog)
+rownames(mat) <- str_replace(rownames(mat), pattern = ".[0-9]+$",replacement = "") 
+mat <- mat[PA_Tib_intersect,]
+mat_zscore <- t(apply(mat, 1, function(x){(x - mean(x)) / sd(x)}))
+
+#Mapping IDs
+mapIDs <- gconvert(rownames(mat_zscore), organism = "hsapiens", target = "ENSG", filter_na = F) %>% select(c(target, name))
+mat_zscore <- mat_zscore %>% as.data.frame() %>% rownames_to_column("Ensembl") %>% left_join(mapIDs, by = c("Ensembl" = "target")) %>% column_to_rownames("name") %>% select(-Ensembl) %>% as.matrix()
+
+
+ #Plotting. It is mandatory to select a row_split otherwise the next lapply call wont work
+ht <- Heatmap(mat_zscore, clustering_distance_rows = "pearson", clustering_method_rows = "ward.D2", show_row_names = T, show_column_dend = T, row_km = 5, heatmap_legend_param = list(title = "Row Z-score", direction = "horizontal", title_position = "topcenter")); draw(ht)
+```
+-->
+
+# TibPalVSveh
+
+Lets start by performing an enrichment of all the genes (both up and down)
+```{r}
+my_alpha <- 0.05
+my_lfcThreshold <- 0.5
+joint <- results(dds, contrast = c("condition","TibPal", "vehiculo"), lfcThreshold = my_lfcThreshold, alpha = my_alpha, tidy = T)
+names(joint)[1] <- "ensembl_gene_id"
+joint <- filter(joint, padj <= my_alpha, log2FoldChange >= my_lfcThreshold | log2FoldChange <= -my_lfcThreshold)
+
+ensembl <- useMart("ensembl",dataset="hsapiens_gene_ensembl")
+mart_info <-
+  biomaRt::getBM(
+    attributes = c("ensembl_gene_id", "entrezgene_id", "external_gene_name", "gene_biotype"),
+    filters = "ensembl_gene_id",
+    values = joint$ensembl_gene_id,
+    mart = ensembl
+  )
+joint <- left_join(joint, mart_info, by = "ensembl_gene_id") %>% distinct(ensembl_gene_id, .keep_all = TRUE)
+write.csv(joint, file = "Results/Individual_contrasts/alpha0.05_lfcThreshold0.5/joint_vs_vehiculo_alpha0.05_lfcThreshold0.5.csv", row.names = F)
+
+# General enrichment
+joint_gost <- gprofiler2::gost(joint$ensembl_gene_id, organism = "hsapiens", ordered_query = T)
+joint_gost_manhattan <- gostplot(joint_gost, interactive = F, capped = F)
+publish_gostplot(p = joint_gost_manhattan, filename = "Results/Individual_contrasts/alpha0.05_lfcThreshold0.5/joint_gost_manhattan.jpeg", highlight_terms= joint_gost$result %>% arrange(p_value) %>% head(10) %>% dplyr::select(term_id))
+
+joint_gost <- joint_gost$result
+joint_gost[sapply(joint_gost, is.list)] <- apply(
+  joint_gost[sapply(joint_gost, is.list)],
+  1, function(x)
+    paste(unlist(x),
+      sep = ", ", collapse = ", "
+    )
+)
+write_csv(joint_gost, path = "Results/Individual_contrasts/alpha0.05_lfcThreshold0.5/joint_gost.csv")
+
+# Enrichment for up expressed genes
+joint_up <- filter(joint, log2FoldChange >= 0)
+joint_up_gost <- gprofiler2::gost(joint_up$ensembl_gene_id, organism = "hsapiens", ordered_query = T)
+joint_up_gost_manhattan <- gostplot(joint_up_gost, interactive = F, capped = F)
+publish_gostplot(p = joint_up_gost_manhattan, filename = "Results/Individual_contrasts/alpha0.05_lfcThreshold0.5/joint_up_gost_manhattan.jpeg", highlight_terms= joint_up_gost$result %>% arrange(p_value) %>% head(10) %>% dplyr::select(term_id))
+
+joint_up_gost <- joint_up_gost$result
+joint_up_gost[sapply(joint_up_gost, is.list)] <- apply(
+  joint_up_gost[sapply(joint_up_gost, is.list)],
+  1, function(x)
+    paste(unlist(x),
+      sep = ", ", collapse = ", "
+    )
+)
+write_csv(joint_up_gost, path = "Results/Individual_contrasts/alpha0.05_lfcThreshold0.5/joint_up_gost.csv")
+
+# Enrichment for down expressed genes
+joint_down <- filter(joint, log2FoldChange <= 0)
+joint_down_gost <- gprofiler2::gost(joint_down$ensembl_gene_id, organism = "hsapiens", ordered_query = T)
+joint_down_gost_manhattan <- gostplot(joint_down_gost, interactive = F, capped = F)
+publish_gostplot(p = joint_down_gost_manhattan, filename = "Results/Individual_contrasts/alpha0.05_lfcThreshold0.5/joint_down_gost_manhattan.jpeg", highlight_terms= joint_down_gost$result %>% arrange(p_value) %>% head(10) %>% dplyr::select(term_id))
+
+joint_down_gost <- joint_down_gost$result
+joint_down_gost[sapply(joint_down_gost, is.list)] <- apply(
+  joint_down_gost[sapply(joint_down_gost, is.list)],
+  1, function(x)
+    paste(unlist(x),
+      sep = ", ", collapse = ", "
+    )
+)
+write_csv(joint_down_gost, path = "Results/Individual_contrasts/alpha0.05_lfcThreshold0.5/joint_down_gost.csv")
+
+```
+
+# Gene Overlap
+## DE genes
+
+To dissect the shared mechanism between PA and Tibolone, lets see how their up and down expressed genes are related:
+```{r}
+# Lets separate the list of up and down-expressed genes per treatment
+palmitato <- read.csv("Results/Individual_contrasts/alpha0.05_lfcThreshold0.5/palmitato_vs_vehiculo_alpha0.05_lfcThreshold0.5.csv")
+pa_up <- palmitato %>% filter(log2FoldChange >= 0) %>% select(ensembl_gene_id) %>% unlist(use.names = F)
+pa_down <- palmitato %>% filter(log2FoldChange <= 0) %>% select(ensembl_gene_id) %>% unlist(use.names = F)
+pa_all <- palmitato %>% select(ensembl_gene_id) %>% unlist(use.names = F) %>% as.character()
+
+joint <- read.csv("Results/Individual_contrasts/alpha0.05_lfcThreshold0.5/joint_vs_vehiculo_alpha0.05_lfcThreshold0.5.csv")
+TibPal_up <- joint %>% filter(log2FoldChange >= 0) %>% select(ensembl_gene_id) %>% unlist(use.names = F)
+TibPal_down <- joint %>% filter(log2FoldChange <= 0) %>% select(ensembl_gene_id) %>% unlist(use.names = F)
+TibPal_all <- joint %>% select(ensembl_gene_id) %>% drop_na() %>% unlist(use.names = F) %>% as.character()
+
+
+# Join each geneset as a list
+DE_per_contrast_updown <- list(PA_up= pa_up, PA_down=pa_down, PA_all=pa_all, TibPal_up=TibPal_up, TibPal_down=TibPal_down, TibPal_all=TibPal_all)
+
+gom.obj <- newGOM(DE_per_contrast_updown, spec='hg19.gene')
+drawHeatmap(gom.obj, what = "odds.ratio", adj.p = T, log.scale = T)
+drawHeatmap(gom.obj, what = "Jaccard", adj.p = T, log.scale = T)
+
+print(gom.obj["PA_all", "TibPal_all"])
+print(gom.obj["PA_up", "Tib_down"])
+print(gom.obj["PA_up", "TibPal_up"])
+print(gom.obj["Tib_down", "TibPal_up"])
+print(gom.obj["PA_down", "TibPal_down"])
+
+pvalue.matrix <- log2(getMatrix(gom.obj, name="pval"))
+pvalue.matrix <- reshape2::melt(pvalue.matrix)
+colnames(pvalue.matrix) <- c("X", "Y", "p.value")
+gplot <- ggplot(pvalue.matrix, aes_string(x = "X", y = "Y", fill = "p.value")) + 
+    geom_tile(col = "white")  + 
+    labs(x = "", y = "")  + 
+  scale_fill_gradient(high="white", low="red") + theme(axis.text.x = element_text(angle = 90, hjust = 1))
+gplot
+```
+
+
+## Astrocyte markers enrichment
+
+Merienne astro markers obtained from their supplementary file `1-s2.0-S2211124719301652-mmc3.xlsx` by setting `Gene defines GLT versus 'cell type' where Cell type can be D1 or D2 or CX3` to `TRUE`. After that only genes matching an ensembl ID were retained (19 were not and were excluded).
+
+```{r}
+merienne <- read_csv("~/Desktop/Genesets/merienne.csv")
+astros_marker <- read_csv("~/Desktop/Genesets/astros_marker.csv")
+obesity <- read_csv("~/Desktop/Genesets/obesity_gwas.csv")
+
+markers <- list(merienne = merienne$Ensembl, patho = dplyr::filter(astros_marker, Type == "pathological") %>% select(Ensembl) %>% unlist(use.names = F), physio = dplyr::filter(astros_marker, Type == "physiological") %>% select(Ensembl) %>% unlist(use.names = F), obesity = unlist(obesity$Ensembl, use.names = F) , obesity_significant = dplyr::filter(obesity, Standardized_Value >= 1.3) %>% select(Ensembl) %>% unlist(use.names = F)) 
+```
+
+```{r}
+DE_per_contrast <- readRDS("~/MEGA/My_project/RNA_seq/transcriptomics/Data/DE_per_contrast.rds")
+gom.obj <- newGOM(DE_per_contrast, markers, spec='hg19.gene')
+drawHeatmap(gom.obj, what = "odds.ratio", adj.p = T)
+drawHeatmap(gom.obj, what = "Jaccard", adj.p = T)
+
+gom.obj["palmitatoVSvehiculo", "patho"]
+gom.obj["TibPalVSvehiculo", "physio"]
+gom.obj["palmitatoVSvehiculo", "obesity"]
+```
+
+## Obesity 
+
+## Plotting enrichment
+```{r}
+mat <- assay(dds_rlog)
+rownames(mat) <- str_replace(rownames(mat), pattern = ".[0-9]+$", replacement = "")
+
+mat <- mat[rownames(mat) %in% unlist(merienne$Ensembl, use.names = F), ]
+
+mapIDs <- gconvert(rownames(mat), organism = "hsapiens", target = "ENSG", filter_na = F)
+mapIDs <- mapIDs %>% select(c(target, name))
+mapIDs_2 <- mapIDs$name
+names(mapIDs_2) <- mapIDs$target
+rownames(mat) <- mapIDs_2
+
+mat_zscore <- t(apply(mat, 1, function(x){(x - mean(x)) / sd(x)}))
+
+ #Plotting. It is mandatory to select a row_split otherwise the next lapply call wont work
+ht <- ComplexHeatmap::Heatmap(mat_zscore, clustering_distance_rows = "pearson", clustering_distance_columns = "pearson", clustering_method_rows = "ward.D2", clustering_method_columns = "ward.D2", show_row_names = T, show_column_dend = F, row_title = NULL, heatmap_legend_param = list(title = "Row Z-score", direction = "horizontal", title_position = "topcenter")); draw(ht)
+```
+
+```{r}
+
+mat <- assay(dds_rlog)
+rownames(mat) <- str_replace(rownames(mat), pattern = ".[0-9]+$", replacement = "")
+
+mat <- mat[rownames(mat) %in% unlist(astros_marker$Ensembl, use.names = F), ]
+
+mapIDs <- gconvert(rownames(mat), organism = "hsapiens", target = "ENSG", filter_na = F)
+mapIDs <- mapIDs %>% select(c(target, name))
+mapIDs_2 <- mapIDs$name
+names(mapIDs_2) <- mapIDs$target
+rownames(mat) <- mapIDs_2
+
+mat_zscore <- t(apply(mat, 1, function(x){(x - mean(x)) / sd(x)}))
+astros_marker2 <- astros_marker[,c(2, 6)] %>% column_to_rownames("Symbol") %>% as.data.frame()
+
+row_ha <- rowAnnotation(df = astros_marker2)
+Heatmap(mat_zscore, right_annotation = row_ha)
+
+
+# Normal
+mat2 <- mat_zscore[rownames(mat_zscore) %in% astros_marker$Symbol[astros_marker$State == "normal"],]
+astros_marker_normal <- as.data.frame(astros_marker[, c(2,5,6)] %>% column_to_rownames("Symbol"))
+astros_marker_normal <- astros_marker_normal[rownames(astros_marker_normal) %in% rownames(mat2),]
+row_ha <- rowAnnotation(df=astros_marker_normal)
+
+Heatmap(mat2, right_annotation = row_ha)
+
+# Patho
+mat2 <- mat_zscore[rownames(mat_zscore) %in% astros_marker$Symbol[astros_marker$State != "normal"],]
+astros_marker_patho <- as.data.frame(astros_marker[, c(2,5,6)] %>% column_to_rownames("Symbol"))
+astros_marker_patho <- astros_marker_patho[rownames(astros_marker_patho) %in% rownames(mat2),]
+row_ha <- rowAnnotation(df=astros_marker_patho)
+
+Heatmap(mat2, right_annotation = row_ha)
+Heatmap(mat2, right_annotation = row_ha, clustering_distance_rows = "pearson", clustering_distance_columns = "pearson", clustering_method_rows = "ward.D2", clustering_method_columns = "ward.D2")
+
+
+
+
+
+
+astros_marker <- astros_marker[order(astros_marker$State),]
+my_order <- match(rownames(mat_zscore),  astros_marker$Symbol)
+
+
+
+odin <- as.data.frame(astros_marker[, c(2,5,6)] %>% column_to_rownames("Symbol"))
+odin <- odin[rownames(odin) %in% rownames(mat2),]
+
+odin <- odin[order(odin$State),]
+
+row_ha <- rowAnnotation(df=odin)
+
+
+Heatmap(mat2, right_annotation = row_ha)
+
+, row_order = astros_marker$Symbol)
+
+
+#Plotting. It is mandatory to select a row_split otherwise the next lapply call wont work
+ht <- ComplexHeatmap::Heatmap(mat_zscore, right_annotation = row_ha, clustering_distance_rows = "pearson", clustering_distance_columns = "pearson", clustering_method_rows = "ward.D2", clustering_method_columns = "ward.D2", show_row_names = T, show_column_dend = F, row_title = NULL, heatmap_legend_param = list(title = "Row Z-score", direction = "horizontal", title_position = "topcenter")); draw(ht, heatmap_legend_side = "bottom", annotation_legend_side = "bottom")
+
+
+row_groups_ha <- lapply(1:length(row_order(ht)), function(i){
+  gene_names <- row.names(mat_zscore[row_order(ht)[[i]],])
+  gost_group <- gost(gene_names, organism = "hsapiens", ordered_query = T)
+  source_term <- gost_group$result %>% group_by(source) %>% summarise(p_value = min(p_value), term = first(term_name)) %>% select(source, term)
+  source_term <- paste(source_term$source, source_term$term, sep = "_")
+  return(source_term)
+  
+})
+```
+```{r fig.height = 17, fig.width = 17}
+draw(ht, heatmap_legend_side = "bottom", annotation_legend_side = "bottom", merge_legend = TRUE)
+
+for(i in 1:length(row_groups_ha)) {
+    decorate_annotation("functional", slice = i, {
+        grid.rect(x = 0, width = unit(2, "mm"), gp = gpar(fill = i, col = NA), just = "left")
+        grid.text(paste(row_groups_ha[[i]], collapse = "\n"), x = unit(3, "mm"), just = "left", check.overlap = T)
+    })
+}
+```
+
+# TRENA
+## For PA
+```{r}
+#Load TRENA
+load("~/MEGA/My_project/RNA_seq/transcriptomics/Data/tbl.models.brain.bulk.Aug3.RData")
+#Load DE genes induced by PA
+pa_genes <- read_csv("Results/Individual_contrasts/alpha0.05_lfcThreshold0.5/palmitato_vs_vehiculo_alpha0.05_lfcThreshold0.5.csv")
+pa_genes <- unlist(pa_genes$external_gene_name)
+
+# How many genes induced by PA after all filters?
+length(pa_genes)
+
+# Out of those, how many are in the TF-target network?
+length(pa_genes[which(pa_genes %in% tbl.models$targetGene)]) #380
+
+pa_TF <- tbl.models[tbl.models$targetGene %in% pa_genes, ]
+pa_TF$gene_class <- ifelse()
+#pa_TF <- pa_TF[pa_TF$rank <= 15,]
+final.df <- pa_TF %>% group_by(gene) %>%
+    summarise(frequency = n(), avg.rank = mean(rank), sd.rank = sd(rank),
+              top.rank = min(rank), bot.rank = max(rank), target.symbol = paste(targetGene,collapse='|')) %>%
+    arrange(desc(frequency),avg.rank)
+final.df <- final.df[complete.cases(final.df),]
+# Lets see if we can shrink the list to further prioritise
+summary(final.df[,-c(1, 7)])
+#Selecting the TF whose sd rank is in the first quartile. i.e. those TF that consistently ranked well based on the pcaMax (extent to which dissimilar methods agree on the TF-target prediction)
+dim(final.df[final.df$sd.rank >= quantile(final.df$sd.rank, .25),-c(1, 7)])#374
+final.df <- final.df[final.df$sd.rank >= quantile(final.df$sd.rank, .25),]
+
+write_csv(final.df, "Results/Individual_contrasts/alpha0.05_lfcThreshold0.5/palmitato_vs_vehiculo_TF_TReNA.csv")
+
+# Creating the network of TF-target
+pa_igraph <- graph_from_data_frame(pa_TF[, c("gene", "targetGene")], directed = T, )
+summary(pa_igraph)
+V(pa_igraph)$type <- ifelse(V(pa_igraph) %in% pa_genes, TRUE, FALSE)
+V(pa_igraph)$color <- ifelse(V(pa_igraph) %in% pa_genes, "red", "blue")
+bipartite.projection(pa_igraph)
+is.simple(pa_igraph)
+is.connected(pa_igraph)
+```
+
+
+#### Additional description
+What is the length of the average geodesic?
+```{r}
+average.path.length(up_igraph) #2.650424
+```
+
+What is the length of the longest geodesic?
+```{r}
+diameter(up_igraph) #7
+```
+
+What is the clustering coefficient of the HI?
+```{r}
+transitivity(up_igraph) # 0.02070152
+```
+
+Which are the most connected nodes?
+```{r}
+head(sort(degree(up_igraph), decreasing = T), 50)
+```
+
+Which are the most strongly connected nodes?
+```{r}
+head(sort(strength(up_igraph), decreasing = T), 50)
+```
+
+Who hears news first?. Lower values mean more centrality.
+```{r}
+head(sort(closeness(up_igraph, normalized=TRUE)), 50)
+```
+
+Who can be a bowtie node? Who has brokerage or gatekeeping potential?
+```{r}
+head(sort(betweenness(up_igraph), decreasing = T), 20)
+```
+
+What is the probability that any message will arrive to a particular node? The higher the more likely
+```{r}
+head(sort(page_rank(up_igraph)$vector, decreasing = T), 20)
+```
+
+Who are the authorities?
+```{r}
+head(sort(authority_score(up_igraph)$vector, decreasing = T), 20)
+```
+
+Degree distribution
+```{r}
+plot(degree_distribution(up_igraph, cumulative = FALSE), log="xy", xlab="Degree",
+ylab="Cumulative Frequency")
+```
+
+### Down
+Now only for the down-regulated genes
+```{r}
+pa_genes <- read_csv("Results/Individual_contrasts/alpha0.05_lfcThreshold0.5/condition_palmitato_vs_vehiculo_alpha0.05_lfcThreshold0.5.csv")
+pa_genes <- pa_genes %>% filter(log2FoldChange <= -0.5) %>% select(name) %>% unlist()
+
+# How many genes induced by PA after all filters?
+length(pa_genes) #103
+
+# Out of those, how many are in the TF-target network?
+length(pa_genes[pa_genes %in% tbl.models$targetGene]) #96
+length(unique(tbl.models$targetGene[tbl.models$targetGene %in% pa_genes])) #3227
+
+pa_TF <- tbl.models[pa_genes %in% tbl.models$targetGene, ]
+
+# Summarising per TF
+final.df <- pa_TF %>% group_by(gene) %>%
+    summarise(frequency = n(), avg.rank = mean(rank), sd.rank = sd(rank),
+              top.rank = min(rank), bot.rank = max(rank), avg.bindingSites = mean(bindingSites), sd.bindingSites = sd(bindingSites), target.symbol = paste(targetGene,collapse='|')) %>%
+    arrange(desc(frequency),avg.rank)
+final.df <- final.df[complete.cases(final.df),]
+
+# Lets see if we can shrink the list to further prioritise and make easier the interpetation
+final.df %>% select(-c("gene", "target.symbol")) %>% summary()
+
+#Selecting the TF whose sd rank is in the first quartile. i.e. those TF that consistently ranked well based on the pcaMax (extent to which dissimilar methods agree on the TF-target prediction)
+#dim(final.df[final.df$sd.rank >= quantile(final.df$sd.rank, .25),-c(1, 7)])#374
+final.df <- final.df[final.df$sd.rank <= quantile(final.df$sd.rank, .25),]
+
+write.table(x=final.df, file = "Results/Individual_contrasts/alpha0.05_lfcThreshold0.5/condition_palmitato_vs_vehiculo_DOWN/TReNA_down.csv", quote = F, sep = ",", row.names = T)
+
+# Creating the network of TF-target
+
+down_igraph <- graph_from_data_frame(pa_TF[pa_TF$gene %in% final.df$gene, c("gene", "targetGene")], directed = T, )
+summary(down_igraph)
+is.simple(down_igraph)
+is.connected(down_igraph)
+```
+
+#### Additional description
+What is the length of the average geodesic?
+```{r}
+average.path.length(down_igraph) #2.650424
+```
+
+What is the length of the longest geodesic?
+```{r}
+diameter(down_igraph) #7
+```
+
+What is the clustering coefficient of the HI?
+```{r}
+transitivity(down_igraph) # 0.02070152
+```
+
+Which are the most connected nodes?
+```{r}
+head(sort(degree(down_igraph), decreasing = T), 50)
+```
+
+Which are the most strongly connected nodes?
+```{r}
+head(sort(strength(down_igraph), decreasing = T), 50)
+```
+
+Who hears news first?. Lower values mean more centrality.
+```{r}
+head(sort(closeness(down_igraph, normalized=TRUE)), 50)
+```
+
+Who can be a bowtie node? Who has brokerage or gatekeeping potential?
+```{r}
+head(sort(betweenness(down_igraph), decreasing = T), 20)
+```
+
+What is the probability that any message will arrive to a particular node? The higher the more likely
+```{r}
+head(sort(page_rank(down_igraph)$vector, decreasing = T), 20)
+```
+
+Who are the authorities?
+```{r}
+head(sort(authority_score(down_igraph)$vector, decreasing = T), 20)
+```
+
+Degree distribution
+```{r}
+plot(degree_distribution(down_igraph, cumulative = FALSE), log="xy", xlab="Degree",
+ylab="Cumulative Frequency")
+```
+-->
+## For the genes reversed
+```{r}
+#Load TRENA
+load("~/MEGA/My_project/RNA_seq/transcriptomics/Data/tbl.models.brain.bulk.Aug3.RData")
+#Load DE genes induced by PA
+upGenes_ByPa_ID <- upGenes_ByPa$external_gene_name
+
+# Out of those, how many are in the TF-target network?
+length(upGenes_ByPa_ID[which(upGenes_ByPa_ID %in% tbl.models$targetGene)])
+length(upGenes_ByPa_ID[which(upGenes_ByPa_ID %in% tbl.models$gene)])#36
+
+upGenes_ByPa_TF <- tbl.models[upGenes_ByPa_ID %in% tbl.models$targetGene, ]
+#pa_TF <- pa_TF[pa_TF$rank <= 15,]
+final.df <- upGenes_ByPa_TF %>% group_by(gene) %>%
+    summarise(frequency = n(), avg.rank = mean(rank), sd.rank = sd(rank),
+              top.rank = min(rank), bot.rank = max(rank), target.symbol = paste(targetGene,collapse='|')) %>%
+    arrange(desc(frequency),avg.rank)
+final.df <- final.df[complete.cases(final.df),]
+# Lets see if we can shrink the list to further prioritise
+summary(final.df[,-c(1, 7)])
+#Selecting the TF whose sd rank is in the first quartile. i.e. those TF that consistently ranked well based on the pcaMax (extent to which dissimilar methods agree on the TF-target prediction)
+dim(final.df[final.df$sd.rank >= quantile(final.df$sd.rank, .25),])#367
+final.df <- final.df[final.df$sd.rank >= quantile(final.df$sd.rank, .25),]
+#write_csv(final.df, "Results/Individual_contrasts/alpha0.05_lfcThreshold0.5/TReNA.csv")
+```
+
+### Network analysis of GRN
+
+```{r}
+# Creating the network of TF-target
+up_igraph <- graph_from_data_frame(final.df[, c("gene", "target.symbol", "frequency", "avg.rank") ], directed = T, )
+summary(up_igraph)
+is.simple(up_igraph)
+is.connected(up_igraph)
+```
+# CEMiTool
+This tool allows to perform Differential Coexpression Analysis in a straightforward way. Once the modules of functionally cohesionated coexpressed genes are found CEMiTool, streightforwardly, creates GSEA and Overenrichment plots to see the enrichment of these modules in the particular treatments.
+
+One of the inputs is a [GMT](https://software.broadinstitute.org/cancer/software/gsea/wiki/index.php/Data_formats) file with the GO BP information that you can find in the [Gprofiler](https://biit.cs.ut.ee/gprofiler/static/gprofiler_hsapiens.ENSG.zip) webpage.
+```{bash}
+# Download
+wget https://biit.cs.ut.ee/gprofiler/static/gprofiler_hsapiens.ENSG.zip
+# Uncompress
+unzip gprofiler_hsapiens.ENSG.zip
+# Head of file
+head -n 1 hsapiens.GO\:BP.ENSG.gmt
+```
+
+Now lets prepare the gene expression and design info:
+```{r}
+#GMT
+gmt_in <- read_gmt("~/Desktop/Genesets/hsapiens.GO:BP.ENSG.gmt")
+
+# Count matrix
+#expr_mat <- read_csv("Data/count_matrix_collapsed_rlog_Ensembl.csv")
+#expr_mat <- expr_mat %>% column_to_rownames("Ensembl") %>% as.data.frame()
+expr_mat    <- assay(x_rld)
+rownames(expr_mat) <- str_replace(rownames(expr_mat), pattern = ".[0-9]+$",replacement = "")
+expr_mat <- as.data.frame(expr_mat)
+
+# Experimental design
+#df <- as.data.frame(read_csv("Data/experimental_design.csv"))
+df <- rownames_to_column(df, "SampleName")
+# CEMiTool run. 1081.25 sec elapsed in a 4 2.4 GHz threads machine with 8GB of RAM
+#tic();cem <- cemitool(expr = expr_mat, annot = df, gmt = gmt_in, set_beta = 16, cor_method = "spearman", class_column = "condition", apply_vst = F, network_type = "signed", gsea_max_size = 3000, verbose=T);toc() 
+cem <- readRDS("Results/CEMITool/cem.rds")
+diagnostic_report(cem, directory= "Results/CEMITool/", force = T)
+generate_report(cem, directory= "Results/CEMITool/", force = T)
+save_plots(cem, "all", directory= "Results/CEMITool/Plots", force = T)
+write_files(cem, directory= "Results/CEMITool/Tables", force = T)
+```
+
+```{r}
+cem
+```
+
+Lets explore closer the modules that pertain PA and Tib action: 
+```{r}
+ora <- cem@ora
+ora$Description <- mapIds(GO.db, keys = ora$ID, column = "TERM", keytype = "GOID")
+
+ora %>% group_by(Module) %>% filter(p.adjust <= 0.05) %>% summary()
+summarise(n())
+
+lapply(1:length(unique(ora$Module)), function(module_i){
+
+  ora %>% filter(Module == "M1", p.adjust <= 0.05, Count >= 20) %>% write_csv(path = "Results/CEMITool/not_max_gsea_size/ora_M1_padj05_mincount20.csv")
+  
+})
+
+
+hubs <- get_hubs(cem,10)
+
+hubs_symbol <- lapply(1:length(hubs), function(i){
+  mapIDs <- gconvert(names(hubs[[i]]), organism = "hsapiens", target = "ENSG", filter_na = F) %>% dplyr::select(c(target, name)) %>% column_to_rownames("target") 
+  mapIDs2 <- mapIDs %>% unlist(use.names = F)
+  names(mapIDs2) <- rownames(mapIDs)
+  return(mapIDs2)
+})
+names(hubs_symbol) <- names(hubs)
+
+summary <- mod_summary(cem, method = "eigengene")
+summary
+mod_summary(cem)
+
+# Retrieve the ORA data
+ora_cem2 <- ora_data(cem2)
+
+# Retrieve the GSEA data as per fgsea
+gsea_cem <- gsea_data(cem)
+
+
+```
+
+# WGCNA
+http://pages.stat.wisc.edu/~yandell/statgen/ucla/WGCNA/wgcna.html
+https://www.researchgate.net/topic/WGCNA
+```{r}
+options(stringsAsFactors = FALSE)
+library(WGCNA)
+gsg <- goodSamplesGenes(t(assay(dds, normalized=T)))
+
+# Choose a set of soft-thresholding powers
+powers = c(c(1:10), seq(from = 12, to=20, by=2))
+# Call the network topology analysis function
+sft = pickSoftThreshold(t(assay(dds, normalized=T)), powerVector = powers, verbose = 5)
+# Plot the results:
+sizeGrWindow(9, 5)
+par(mfrow = c(1,2));
+cex1 = 0.9;
+# Scale-free topology fit index as a function of the soft-thresholding power
+plot(sft$fitIndices[,1], -sign(sft$fitIndices[,3])*sft$fitIndices[,2],
+xlab="Soft Threshold (power)",ylab="Scale Free Topology Model Fit,signed R^2",type="n",
+main = paste("Scale independence"));
+text(sft$fitIndices[,1], -sign(sft$fitIndices[,3])*sft$fitIndices[,2],
+labels=powers,cex=cex1,col="red");
+# this line corresponds to using an R^2 cut-off of h
+abline(h=0.90,col="red")
+# Mean connectivity as a function of the soft-thresholding power
+plot(sft$fitIndices[,1], sft$fitIndices[,5],
+xlab="Soft Threshold (power)",ylab="Mean Connectivity", type="n",
+main = paste("Mean connectivity"))
+text(sft$fitIndices[,1], sft$fitIndices[,5], labels=powers, cex=cex1,col="red")
+#We now calculate the adjacencies, using the soft thresholding power from previous plot:
+softPower = 10;
+datExpr = t(assay(dds, normalized=T));
+adjacency = adjacency(datExpr, power = softPower);
+
+# Turn adjacency into topological overlap
+TOM = TOMsimilarity(adjacency);
+dissTOM = 1-TOM
+# saveRDS(dissTOM, "Data/Vehiculo2/dissTOM_dds_wgcna.rds")
+# Call the hierarchical clustering function
+geneTree = hclust(as.dist(dissTOM), method = "average"); #saveRDS(geneTree, "Data/Vehiculo2/geneTree_dds_wgcna.rds")
+# Plot the resulting clustering tree (dendrogram)
+sizeGrWindow(12,9)
+plot(geneTree, xlab="", sub="", main = "Gene clustering on TOM-based dissimilarity",
+labels = FALSE, hang = 0.04);
+
+minModuleSize = 50;
+# Module identification using dynamic tree cut:
+dynamicMods = cutreeDynamic(dendro = geneTree, distM = dissTOM,
+deepSplit = 2, pamRespectsDendro = FALSE,
+minClusterSize = minModuleSize);
+table(dynamicMods)
+# Convert numeric lables into colors
+dynamicColors = labels2colors(dynamicMods)
+table(dynamicColors)
+# Plot the dendrogram and colors underneath
+sizeGrWindow(8,6)
+plotDendroAndColors(geneTree, dynamicColors, "Dynamic Tree Cut",
+dendroLabels = FALSE, hang = 0.03,
+addGuide = TRUE, guideHang = 0.05,
+main = "Gene dendrogram and module colors")
+# Merging coexpressed modules to reduce module number
+# Calculate eigengenes
+MEList = moduleEigengenes(datExpr, colors = dynamicColors)
+MEs = MEList$eigengenes
+# Calculate dissimilarity of module eigengenes
+MEDiss = 1-cor(MEs);
+# Cluster module eigengenes
+METree = hclust(as.dist(MEDiss), method = "average");
+# Plot the result
+sizeGrWindow(7, 6)
+plot(METree, main = "Clustering of module eigengenes",
+xlab = "", sub = "")
+
+MEDissThres = 0.4
+# Plot the cut line into the dendrogram
+abline(h=MEDissThres, col = "red")
+# Call an automatic merging function
+merge = mergeCloseModules(datExpr, dynamicColors, cutHeight = MEDissThres, verbose = 3)
+# The merged module colors
+mergedColors = merge$colors;
+# Eigengenes of the new merged modules:
+mergedMEs = merge$newMEs;
+# Plot
+sizeGrWindow(12, 9)
+#pdf(file = "Plots/geneDendro-3.pdf", wi = 9, he = 6)
+plotDendroAndColors(geneTree, cbind(dynamicColors, mergedColors),
+c("Dynamic Tree Cut", "Merged dynamic"),
+dendroLabels = FALSE, hang = 0.03,
+addGuide = TRUE, guideHang = 0.05)
+#dev.off()
+# Exporting module detection information
+# Rename to moduleColors
+moduleColors = mergedColors
+# Construct numerical labels corresponding to the colors
+colorOrder = c("grey", standardColors(50));
+moduleLabels = match(moduleColors, colorOrder)-1;
+MEs = mergedMEs;
+# Save module colors and labels for use in subsequent parts
+save(MEs, moduleLabels, moduleColors, geneTree, file = "Data/Vehiculo2/minModuleSize_50_MEDissThres_04_wgcna.RData")
+
+
+# 3
+# Define numbers of genes and samples
+nGenes = ncol(datExpr);
+nSamples = nrow(datExpr);
+# Recalculate MEs with color labels
+MEs0 = moduleEigengenes(datExpr, moduleColors)$eigengenes
+MEs = orderMEs(MEs0)
+df <- as.data.frame(colData(dds))
+df <- df[,-c(4,5)]
+
+moduleTraitCor = cor(MEs, datTraits, use = "p");
+moduleTraitPvalue = corPvalueStudent(moduleTraitCor, nSamples);
+
+datExpr_plus_mergedColor <- cbind(as.data.frame(t(datExpr)), mergedColors = as.factor(mergedColors))
+
+# 
+ datExpr_plus_mergedColor %>% group_by(mergedColors) %>% summarize(n()) 
+ datExpr_plus_mergedColor_2<-datExpr_plus_mergedColor
+ 
+ 
+ rownames(datExpr_plus_mergedColor) <- str_replace(rownames(datExpr_plus_mergedColor), pattern = ".[0-9]+$",replacement = "") 
+ 
+cl <- makeCluster(20)
+clusterExport(cl=cl, varlist=c("datExpr_plus_mergedColor"))
+tic()
+freya <- parLapply(cl, 1:length(levels(datExpr_plus_mergedColor)), function(i){
+  
+  module_name <- levels(datExpr_plus_mergedColor$mergedColors)[1]
+  genes_per_module_i <- datExpr_plus_mergedColor[datExpr_plus_mergedColor$mergedColors == module_name,]
+  gene_names <- row.names(genes_per_module_i)
+  gost_group <- gprofiler2::gost(gene_names, organism = "hsapiens", ordered_query = T)
+  plotly_group <- gostplot(gost_group, interactive = T, capped = F)
+
+htmlwidgets::saveWidget(plotly_group, paste0(module_name, "_wgcna.html"))
+gost_group$result %>% select(-parents) %>% write.csv(paste0(module_name, "_wgcna.csv"))
+#write.csv2(, )
+
+  
+  return(gost_group)
+  message(paste0(i," done"))
+})
+toc()
+stopCluster(cl)
+
+cl <- makeCluster(20)
+clusterExport(cl=cl, varlist=c("odin"))
+tic()
+freya <- parLapply(cl, 1:length(levels(odin)), function(i){
+  
+  module_name <- levels(odin$mergedColors)[i]
+  genes_per_module_i <- dplyr::filter(odin, mergedColors == module_name)
+  gene_names <- row.names(genes_per_module_i)
+  gost_group <- gprofiler2::gost(gene_names, organism = "hsapiens", ordered_query = T)
+  gost_group <- dplyr::select(gost_group$result, -parents)
+  return(gost_group)
+})
+toc()
+stopCluster(cl)
+
+
+```
+
+```{r}
+DE_per_contrast <- readRDS("~/MEGA/My_project/RNA_seq/transcriptomics/Data/DE_per_contrast.rds")
+DE_per_contrast <- DE_per_contrast[-6]
+
+WGCNA_modules <- read_csv("Results/WGCNA_normalised/WGCNA_modules.csv")
+WGCNA_modules <- select(WGCNA_modules, "Module#", symbol, "gene id", "Module color")
+names(WGCNA_modules) <- c("ModNum", "Symbol", "Ensembl", "ModCol")
+odin <- WGCNA_modules  %>% select(Ensembl, ModCol) %>% group_by(ModCol) %>% group_split()
+freya <- lapply(odin, function(i) {unlist(dplyr::select(i, Ensembl), use.names = F)})
+odin_names <- WGCNA_modules  %>% select(Ensembl, ModCol) %>% group_by(ModCol) %>% summarise(n())
+odin_names <- odin_names$ModCol
+names(freya) <- odin_names
+
+condition_palmitato_vs_vehiculo_alpha0_05_lfcThreshold0_5 <- read_csv("Results/Individual_contrasts/alpha0.05_lfcThreshold0.5/condition_palmitato_vs_vehiculo_alpha0.05_lfcThreshold0.5.csv")
+pa_up <- condition_palmitato_vs_vehiculo_alpha0_05_lfcThreshold0_5 %>% filter(log2FoldChange >= 0) %>% select(Ensembl) %>% unlist(use.names = F)
+pa_down <- condition_palmitato_vs_vehiculo_alpha0_05_lfcThreshold0_5 %>% filter(log2FoldChange <= 0) %>% select(Ensembl) %>% unlist(use.names = F)
+
+condition_tibolona_vs_vehiculo_alpha0_05_lfcThreshold0_5 <- read_csv("Results/Individual_contrasts/alpha0.05_lfcThreshold0.5/condition_tibolona_vs_vehiculo_alpha0.05_lfcThreshold0.5.csv")
+tib_up <- condition_tibolona_vs_vehiculo_alpha0_05_lfcThreshold0_5 %>% filter(log2FoldChange >= 0) %>% select(Ensembl) %>% unlist(use.names = F)
+tib_down <- condition_tibolona_vs_vehiculo_alpha0_05_lfcThreshold0_5 %>% filter(log2FoldChange <= 0) %>% select(Ensembl) %>% unlist(use.names = F)
+
+condition_TibPal_vs_vehiculo_alpha0_05_lfcThreshold0_5 <- read_csv("Results/Individual_contrasts/alpha0.05_lfcThreshold0.5/condition_TibPal_vs_vehiculo_alpha0.05_lfcThreshold0.5.csv")
+TibPal_up <- condition_TibPal_vs_vehiculo_alpha0_05_lfcThreshold0_5 %>% filter(log2FoldChange >= 0) %>% select(Ensembl) %>% unlist(use.names = F)
+TibPal_down <- condition_TibPal_vs_vehiculo_alpha0_05_lfcThreshold0_5 %>% filter(log2FoldChange <= 0) %>% select(Ensembl) %>% unlist(use.names = F)
+
+DE_per_contrast <- list.append(DE_per_contrast, pa_up= pa_up, pa_down=pa_down, tib_up=tib_up, tib_down=tib_down, TibPal_up=TibPal_up, TibPal_down=TibPal_down)
+
+gom.obj <- newGOM(DE_per_contrast, freya, spec='hg19.gene')
+drawHeatmap(gom.obj, what = "odds.ratio", adj.p = T, log.scale = T)
+drawHeatmap(gom.obj, what = "Jaccard", adj.p = T, log.scale = T)
+print(gom.obj["palmitatoVSvehiculo", "turquoise"])
+pvalue.matrix <- getMatrix(gom.obj, name="pval")
+
+gom.obj <- newGOM(DE_per_contrast, spec='hg19.gene')
+drawHeatmap(gom.obj, what = "odds.ratio", adj.p = T, log.scale = T)
+drawHeatmap(gom.obj, what = "Jaccard", adj.p = T, log.scale = T)
+
+print(gom.obj["pa_up", "tib_down"])
+
+
+pvalue.matrix <- melt(pvalue.matrix)
+colnames(pvalue.matrix) <- c("X", "Y", "p.value")
+gplot <- ggplot(df, aes_string(x = "X", y = "Y", fill = "p.value")) + 
+    geom_tile(col = "white") + scale_fill_continuous("p-value") + 
+    labs(x = "Algorithm", y = "Algorithm")
+
+```
+
+
+<!--
+# DEGpattern
+```{r}
+library(DEGreport)
+res_alpha_lfc_2 <- results(dds, contrast = c("condition","palmitato", "vehiculo"), alpha = my_alpha, lfcThreshold = my_lfcThreshold)
+genes_selected <- res_alpha_lfc_2 %>%
+     as.data.frame() %>% rownames_to_column("Ensembl") %>%
+     dplyr::filter(
+         log2FoldChange >= my_lfcThreshold |
+             log2FoldChange <= -my_lfcThreshold,
+         padj <= my_alpha
+     )
+ma <- assay(dds_rlog)
+ma <- ma[genes_selected$Ensembl,]
+res <- degPatterns(ma, df, col = "condition", time = "condition")
+
+res$plot
+group1 <- res$df %>%
+          filter(cluster == 1)
+dim(group1)
+```
+-->
+# Files to export
+```{r}
+# Import matrix of collapsed technical replicates. i.e. each of the 15 treatmentXreplicate has 2 technical replicates, this file has collapsed those 2 technical replicates using DESeq2.
+count_matrix_collapsed <- read_csv("Data/count_matrix_collapsed.csv")
+d <- data.frame(matrix(nrow = nrow(count_matrix_collapsed)))
+rownames(d) <- count_matrix_collapsed$Ensembl
+d[,1] <- count_matrix_collapsed$Symbol
+d[,2] <- apply(count_matrix_collapsed[,grep("NHA[1-9]_DMEM",names(count_matrix_collapsed))],1, mean)
+d[,3] <- apply(count_matrix_collapsed[,grep("NHA[1-9]_vehiculo",names(count_matrix_collapsed))],1, mean)
+d[,4] <- apply(count_matrix_collapsed[,grep("NHA[1-9]_palmitato",names(count_matrix_collapsed))],1, mean)
+d[,5] <- apply(count_matrix_collapsed[,grep("NHA[1-9]_tibolona",names(count_matrix_collapsed))],1, mean)
+d[,6] <- apply(count_matrix_collapsed[,grep("NHA[1-9]_TibPal",names(count_matrix_collapsed))],1, mean)
+d <- rownames_to_column(d, "Ensembl")
+names(d) <- c("Ensembl", "Symbol", "DMEM", "vehiculo", "palmitato", "tibolona", "TibPal")
+dim(d)
+write.csv(d, file = "Data/count_matrix_collapsed_ansep.csv")
+
+```
+
+# Debugging the outliers issue
+EXPLAIN THE PROBLEM HERE
+```{r}
+# Extract the tables for the treatments of interest
+my_alpha <- 0.05
+my_lfcThreshold <- 0.5
+palmitato <- results(dds, contrast = c("condition","palmitato", "vehiculo"), lfcThreshold = my_lfcThreshold, alpha = my_alpha, tidy = T)
+palmitato$row <- str_replace(palmitato$row, pattern = ".[0-9]+$",replacement = "") 
+names(palmitato)[1] <- "ensembl_gene_id"
+joint <- results(dds, contrast = c("condition","TibPal", "vehiculo"), lfcThreshold = my_lfcThreshold, alpha = my_alpha, tidy = T)
+joint$row <- str_replace(joint$row, pattern = ".[0-9]+$",replacement = "") 
+names(joint)[1] <- "ensembl_gene_id"
+
+# Joining only the LFC values for the 31167 genes
+LFC_pa_joint <- left_join(palmitato, joint, by = "ensembl_gene_id", suffix = c("_pa", "_joint")) %>% select(ensembl_gene_id, log2FoldChange_pa, padj_pa, log2FoldChange_joint, padj_joint ) %>% rename(ensembl_gene_id = ensembl_gene_id)
+
+# Lets plot the LFC
+plot(y = LFC_pa_joint$log2FoldChange_joint - LFC_pa_joint$log2FoldChange_pa, x = LFC_pa_joint$log2FoldChange_pa, xlab="log(FC_palmitato)", ylab="log(FC_joint) - log(FC_palmitato)")
+plot(y = LFC_pa_joint$log2FoldChange_joint, x = LFC_pa_joint$log2FoldChange_pa, xlab="log(FC_palmitato)", ylab="log(FC_joint)")
+abline(h=0)
+
+# Extract the raw counts to explore outliers
+raw_counts <- counts(dds)
+rownames(raw_counts) <- str_replace(rownames(raw_counts), pattern = ".[0-9]+$",replacement = "")
+
+# Filtering the extreme LFC
+extreme_LFC <- filter(LFC_pa_joint, log2FoldChange_pa >= 15 | log2FoldChange_pa <= -10 | log2FoldChange_joint >= 10 | log2FoldChange_joint <= -10) %>% dplyr::select(ensembl_gene_id) %>% unlist() %>% as.character()
+extreme_LFC_counts <- raw_counts[rownames(raw_counts) %in% extreme_LFC,]
+
+# Actual counts
+View(extreme_LFC_counts)
+
+# Lets plot a heatmap
+pheatmap(extreme_LFC_counts, cluster_rows = F)
+
+# Lets see what are the padjs for those genes calculated by DESeq2
+dplyr::filter(LFC_pa_joint, ensembl_gene_id %in% extreme_LFC) %>% View()
+
+# Lets see if DESeq2 actually identified them as outliers
+cooks <- assays(dds)[["cooks"]]
+rownames(cooks) <- str_replace(rownames(cooks), pattern = ".[0-9]+$",replacement = "")
+pheatmap(cooks[extreme_LFC,], cluster_rows = F)
+boxplot(log10(assays(dds)[["cooks"]]),las=2)
+
+# What is the cutoff used by DESeq2 on the cooks distance to flag a gene/sample as an outlier?
+W <- palmitato$stat
+maxCooks <- apply(assays(dds)[["cooks"]],1,max)
+idx <- !is.na(W)
+plot(W[idx], maxCooks[idx], xlab="Wald statistic", 
+     ylab="maximum Cook's distance per gene",
+     main="Palmitic Acid treatment Cook's distance cutoff",
+     cex=.4, col=rgb(0,0,0,.3))
+m <- ncol(dds)
+p <- 3
+abline(h=qf(.99, p, m - p), col="red") # 5.952545
+abline(v=3)
+abline(v=-3)
+
+W <- joint$stat
+maxCooks <- apply(assays(dds)[["cooks"]],1,max)
+idx <- !is.na(W)
+plot(W[idx], maxCooks[idx], xlab="Wald statistic", 
+     ylab="maximum Cook's distance per gene", 
+     main="Joint treatment Cook's distance cutoff" ,
+     cex=.4, col=rgb(0,0,0,.3))
+m <- ncol(dds)
+p <- 3
+abline(h=qf(.99, p, m - p), col="red")
+abline(v=3)
+abline(v=-3)
+
+# To make DEseq2 automatically deal with outliers you have to have at least 3 replicates per condition, which I do. However, for every term you add to the desing formula DESeq2 have to estimate more coefficients which are the reference to calculate the Cook's cutoff. So the more covariates the higher the cutoff the more samples you need, and that is why it is not performing the automatic filtering. You can check this up in the code of the "results()" function, in the section about "cooksCutoff. Lets see if that hypothesis is true. For that we are going to compare whether the slots mcols(dds)[["maxCooks"]] is present in the dds object with and without the covariate sex:
+
+# With the covariate: it is our current value
+mcols(dds)[["maxCooks"]] # All of them are marked as NA because the distance was not even calculated due to not enough sample size
+
+# Without the covariate:
+x_nosex <- DESeqDataSetFromTximport(vali, sampleTable, ~ condition)
+x_nosex$condition <- relevel(x_nosex$condition, "vehiculo")
+x_nosex <- collapseReplicates(x_nosex, x_nosex$tech_rep, x_nosex$condition)
+x_nosex_morethan10 <- x_nosex[rowSums(counts(x)) >= 10, ]
+dds_nosex <- DESeq(x_nosex_morethan10)
+mcols(dds_nosex)[["maxCooks"]] # Now every gene has its cooks distance calculated
+
+# In conclusion: It seems plausible that the poutliers seen in the treatments were not excluded because of the addition of the covariate in the design formula. There might be other reasons explaining that phenomenon though.
+# the solution, following Michael Love suggestions (https://support.bioconductor.org/p/89526/  and  https://support.bioconductor.org/p/96595/) I am going to take the maxCooks from the dds witouth the covariate and then manually filter the genes out when using the dds with the covariate. The question thata arises is: why that approach is better than taking the apply(assays(dds)[["cooks"]],1,max)? The answer is that the cutoff will change because the number of parameters in dds and dds_nosex are different:
+
+dim(attributes(dds)$dispModelMatrix) #15 6
+dim(attributes(dds_nosex)$dispModelMatrix) #15 5
+
+#In principle, the model with less number of parameters is preferred because reduces the number of degrees of freedom, but also because that is the dataset used to get the cook's distance values so, to mantain the consistency and be coherent the cutoff is also going to be calculated using the number of parameters in the nosex. The cutoff for the Cooks distance is going to be calculated using qf(.99, p, m - p) where p and m are defined as in ?results and are stored in attributes(dds)$dispModelMatrix.
+
+maxCooks <- mcols(dds_nosex)[["maxCooks"]]
+names(maxCooks) <- str_replace(names(maxCooks), pattern = ".[0-9]+$",replacement = "")
+maxCooks <- maxCooks %>% as.data.frame() %>% rownames_to_column("ensembl_gene_id") %>% rename(maxCooks = ".")
+LFC_pa_joint <- left_join(LFC_pa_joint, maxCooks)
+# Calculating the cutoff
+p <- ncol(attributes(dds_nosex)$dispModelMatrix)
+m <- nrow(attributes(dds_nosex)$dispModelMatrix)
+maxCooks_cutoff <- qf(.99, p, m - p)
+
+# Filtering the genes that are not outliers
+dim(LFC_pa_joint) # before the filtering: 31167 genes
+LFC_pa_joint <- LFC_pa_joint %>% filter(maxCooks <= maxCooks_cutoff)
+dim(LFC_pa_joint) # After the filtering: 30758 genes
+
+# Letss see if it worked
+plot(y = LFC_pa_joint$log2FoldChange_joint, x = LFC_pa_joint$log2FoldChange_pa, xlab="log(FC_palmitato)", ylab="log(FC_joint)")
+plot(y = LFC_pa_joint$log2FoldChange_joint - LFC_pa_joint$log2FoldChange_pa, x = LFC_pa_joint$log2FoldChange_pa, xlab="log(FC_palmitato)", ylab="log(FC_joint) - log(FC_palmitato)", log = "x")
+
+# Lets filter only the significant genes
+# Significant in both conditions
+LFC_pa_joint %>% filter(padj_joint <= my_alpha, padj_pa <= my_alpha) %>% dim() # 470
+# Significant only in the joint treatment
+LFC_pa_joint %>% filter(padj_joint <= my_alpha) %>% dim() # 807
+# Significant only in the pa treatment
+LFC_pa_joint %>% filter(padj_pa <= my_alpha) %>% dim() # 626
+
+LFC_pa_joint <- LFC_pa_joint %>% filter(padj_joint <= my_alpha, padj_pa <= my_alpha)
+
+# And lets plot again:
+plot(y = LFC_pa_joint$log2FoldChange_joint - LFC_pa_joint$log2FoldChange_pa, x = LFC_pa_joint$log2FoldChange_pa, xlab="log(FC_palmitato)", ylab="log(FC_joint) - log(FC_palmitato)", log = "x")
+abline(h=0)
+
+plot(y = LFC_pa_joint$log2FoldChange_joint, x = LFC_pa_joint$log2FoldChange_pa, xlab="LFC_palmitato", ylab="LFC_joint")
+abline(h=0)
+
+# Now the plot looks cleaner and we can extract information from it: 1) Some genes up expressed by PA tend to be downexpressed by Tibolone 2) More genes, however, tend to be up-expressed by PA and also up by Tib though the magnitude of change is lower in Tib
+
+#Lets plot a dubmbell plot to better represent the idea of PA vs Tib actions
+
+# Sorting the plot. Alternatives: 1) order(LFC_pa_joint$log2FoldChange_pa - LFC_pa_joint$log2FoldChange_diff), 2) order(LFC_pa_joint$log2FoldChange_pa), 3) order(LFC_pa_joint$log2FoldChange_diff)
+LFC_pa_joint$ensembl_gene_id <- factor(LFC_pa_joint$ensembl_gene_id, levels = LFC_pa_joint$ensembl_gene_id[order(LFC_pa_joint$log2FoldChange_pa)]) 
+
+ggplot(LFC_pa_joint, aes(y = ensembl_gene_id, x = log2FoldChange_joint, xend =log2FoldChange_pa)) + ggalt::geom_dumbbell(size_x=3.5, size_xend = 3.5,colour_x="#56B4E9", colour_xend = "#E69F00", size=0.1) + theme(axis.text.y=element_blank(),
+        axis.ticks.y=element_blank()) +  labs(x = "LFC of Palmitic Acid (yellow) and Palmitic Acid+Tibolone (blue)", y = "Gene") + geom_vline(xintercept = 0)
+
+####
+# AUC calculation https://stackoverflow.com/questions/4954507/calculate-the-area-under-a-curve
+
+#Out of the genes significant in PA, extract the reversed ones (i.e. those below the curves, not the ones above them)
+LFC_pa_joint <- LFC_pa_joint %>% filter(padj_pa <= my_alpha)
+LFC_pa_joint_upInPA <- LFC_pa_joint %>% filter(log2FoldChange_pa >= 0, log2FoldChange_joint <= log2FoldChange_pa)
+LFC_pa_joint_downInPA <- LFC_pa_joint %>% filter(log2FoldChange_pa <= 0, log2FoldChange_joint >= log2FoldChange_pa)
+LFC_pa_joint <- bind_rows(LFC_pa_joint_upInPA, LFC_pa_joint_downInPA)
+
+#
+sum(diff(1:length(LFC_pa_joint$log2FoldChange_joint)) * (head(abs(LFC_pa_joint$log2FoldChange_joint),-1)+tail(abs(LFC_pa_joint$log2FoldChange_joint),-1)))/2
+#OR
+auc_joint <- MESS::auc(1:length(LFC_pa_joint$log2FoldChange_joint),abs(LFC_pa_joint$log2FoldChange_joint)) # 562.9386
+auc_pa <- MESS::auc(1:length(LFC_pa_joint$log2FoldChange_pa),abs(LFC_pa_joint$log2FoldChange_pa)) # 838.5111
+# What is the percentage of the PA auc covered by the joint auc?
+(auc_joint*100)/auc_pa # 67.1355%
+# How much of the pa effectwas reversed by Tib?
+100-67.1355 # 32.8645%
+#Is that difference significant? What test can I use to assess that?
+
+
+# Lets explore the genes
+LFC_pa_joint <- read_csv("Results/Individual_contrasts/alpha0.05_lfcThreshold0.5/LFC_pa_joint_no_outliers.csv")
+LFC_pa_joint$log2FoldChange_diff <- abs(LFC_pa_joint$log2FoldChange_diff)
+LFC_pa_joint <- LFC_pa_joint %>% filter(padj_pa <= my_alpha)
+
+# What are the genes that the joint treatment affect the most?
+LFC_pa_joint %>% filter(log2FoldChange_diff >= quantile(log2FoldChange_diff, 0.75)) %>% arrange(desc(log2FoldChange_diff)) %>% write.csv2(x=., file = "Results/Individual_contrasts/alpha0.05_lfcThreshold0.5/LFC_pa_joint_no_outliers_significant_in_PA_0.75LFCdiff.csv", row.names = F)
+
+# Out of the genes upexpressed by PA, how many are reversed by the joint
+upGenes_ByPa <- LFC_pa_joint %>% filter(log2FoldChange_pa >= 0, log2FoldChange_joint <= log2FoldChange_pa) %>% filter(log2FoldChange_diff >= quantile(log2FoldChange_diff, 0.75)) %>% arrange(desc(log2FoldChange_diff))
+
+# Out of the genes downexpressed by PA, how many are reversed by the joint
+downGenes_ByPa <- LFC_pa_joint %>% filter(log2FoldChange_pa <= 0, log2FoldChange_joint >= log2FoldChange_pa) %>% filter(log2FoldChange_diff >= quantile(log2FoldChange_diff, 0.75)) %>% arrange(desc(log2FoldChange_diff))
+
+# What are the genes on which the joint treatment reverses the effect of PA most markedly?
+bind_rows(upGenes_ByPa, downGenes_ByPa) %>% arrange(desc(log2FoldChange_diff)) %>% write.csv(x=., file = "Results/Individual_contrasts/alpha0.05_lfcThreshold0.5/LFC_pa_joint_no_outliers_significant_in_PA_MostReversed_0.75LFCdiff.csv", row.names = F)
+
+#LFC_pa_joint %>% filter(log2FoldChange_joint <= log2FoldChange_pa, log2FoldChange_diff >= quantile(log2FoldChange_diff, 0.75)) %>% arrange(desc(log2FoldChange_diff)) %>% write.csv2(x=., file = "Results/Individual_contrasts/alpha0.05_lfcThreshold0.5/LFC_pa_joint_no_outliers_significant_in_PA_onlyUnderTheCurve_0.75LFCdiff.csv")
+
+#####
+
+LFC_pa_joint_tib %>% filter(padj_pa <= my_alpha, padj_joint <= my_alpha, log2FoldChange_pa > 0, log2FoldChange_diff < 0) %>% dplyr::select(ensembl_gene_id) %>% unlist() %>% as.character() %>% gprofiler2::gost(query = ., organism = "hsapiens", ordered_query = T)
+
+##################
+
+# Lets get some information about the biotype of each gene
+library("biomaRt")
+ensembl <- useMart("ensembl",dataset="hsapiens_gene_ensembl")
+head(listFilters(ensembl))
+head(listAttributes(ensembl))
+# searchAttributes(mart = ensembl, pattern = "symbol")
+mart_info <-
+  biomaRt::getBM(
+    attributes = c("ensembl_gene_id", "entrezgene_id", "external_gene_name", "gene_biotype"),
+    filters = "ensembl_gene_id",
+    values = LFC_pa_joint$ensembl_gene_id,
+    mart = ensembl
+  )
+
+# Immune genes
+mart_immuneBP <-
+  biomaRt::getBM(
+    attributes = c("ensembl_gene_id", "go_id", "name_1006"),
+    filters = "go",
+    values = "GO:0002376",
+    mart = ensembl
+  )
+length(intersect(LFC_pa_joint$ensembl_gene_id, mart_immuneBP$ensembl_gene_id)) #514 Immune genes
+
+# Apoptosis genes
+mart_immuneBP <-
+  biomaRt::getBM(
+    attributes = c("ensembl_gene_id", "go_id", "name_1006"),
+    filters = "go",
+    values = "GO:0006915",
+    mart = ensembl
+  )
+length(intersect(LFC_pa_joint$ensembl_gene_id, mart_immuneBP$ensembl_gene_id)) #514 Immune genes
+
+
+
+# Joinning tables
+#LFC_pa_joint <- plyr::join_all(list(LFC_pa_joint, mart_info, mart_immuneBP), by='ensembl_gene_id', type='left') %>% dplyr::distinct(ensembl_gene_id, .keep_all = TRUE)
+LFC_pa_joint <- left_join(LFC_pa_joint, mart_info, by = "ensembl_gene_id") %>% distinct(ensembl_gene_id, .keep_all = TRUE)
+
+LFC_pa_joint2$go_id <- ifelse(LFC_pa_joint$ensembl_gene_id %in% mart_immuneBP$ensembl_gene_id, "Immune", factor(NA))
+
+# Plot
+LFC_plot <- ggplot(LFC_pa_joint2, aes(x = log2FoldChange_pa, y = log2FoldChange_joint - log2FoldChange_pa)) + geom_point()
+
+LFC_plot + geom_smooth()
+
+LFC_plot + geom_smooth() + scale_x_continuous(trans = 'log2')
+
+LFC_plot + geom_point(aes(colour = gene_biotype)) + geom_smooth()
+LFC_plot + geom_point(aes(colour = go_id))
+
+LFC_plot <- ggplot(LFC_pa_joint2, aes(x = log2FoldChange_pa, y = log2FoldChange_joint - log2FoldChange_pa)) + geom_point()
+
+## Dumbbell plot
+
+#filter(LFC_pa_joint, padj_pa <= 0.01 & padj_joint <= 0.01 & log2FoldChange_pa >= 1.5 | log2FoldChange_pa <= -1.5 & log2FoldChange_joint >= 1.5 | log2FoldChange_joint <= -1.5) %>% dim()
+pa <- filter(palmitato, log2FoldChange >= my_lfcThreshold |
+            log2FoldChange <= -my_lfcThreshold,
+        padj <= my_alpha)
+
+TibPal <- filter(joint, log2FoldChange >= my_lfcThreshold |
+            log2FoldChange <= -my_lfcThreshold,
+        padj <= my_alpha)
+my_union <- TibPal$row[pa$row %in% TibPal$row]
+my_union <- str_replace(my_union, pattern = ".[0-9]+$",replacement = "") 
+
+LFC_pa_joint3 <- filter(LFC_pa_joint, ensembl_gene_id %in% my_union)
+LFC_pa_joint3$ensembl_gene_id <- as.factor(LFC_pa_joint3$ensembl_gene_id)
+#[200:300,c(1,2, 4)]https://rpubs.com/ageek/ggplot-adv-part2
+ggplot(LFC_pa_joint3, aes(y = ensembl_gene_id, x = log2FoldChange_joint, xend =log2FoldChange_pa)) + ggalt::geom_dumbbell(size_x=3.5, size_xend = 3.5,colour_x="gray", colour_xend = "green")
+
+
+
+
+
+
+
+       
+
+
+
+
+
+```
+
+
+
+# Session information
+```{r}
+sessionInfo()
+```
+
